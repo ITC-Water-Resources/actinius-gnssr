@@ -10,6 +10,7 @@ together with an Adafruit featherwing data logger
 3. ~~Allow writing of lz4 compressed files to the sdcard (to store nmea messages, and telemetry)~~
 4. Add functionality to upload nmea logs to an external server using the on board LTE chip
 5. (Bonus add functionality to to a remote over-the air update of the firmware)
+6. Read privacy sensitive settings from configuration file (such as upload passwords etc.)
 
 ## TODO:Hardware
 1. Assemble battery, charger and solar panel, and case
@@ -17,7 +18,6 @@ together with an Adafruit featherwing data logger
 
 
 # Building the firmware
-inmcomplete
 Building this firmware requires [installing the Software development Kit from Nordic](https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/nrf/getting_started.html). Which is an extended version of the Zephyr development kit
 `west build -b actinius_icarus_ns -d build`
 

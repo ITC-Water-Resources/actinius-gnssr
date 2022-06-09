@@ -9,11 +9,12 @@ refactored and modified from the fat_fs zephyr example by Tavish Naruka <tavishn
 #include <storage/disk_access.h>
 #include <fs/fs.h>
 #include <ff.h>
-
+#include <fs/fs_interface.h>
 #include <logging/log.h>
 #include "featherw_datalogger.h"
+#include <sys/types.h>
 
-LOG_MODULE_DECLARE(main);
+LOG_MODULE_DECLARE(GNSSR);
 
 static FATFS fat_fs;
 /* mounting info */
@@ -21,7 +22,7 @@ static struct fs_mount_t mp = {
 	.type = FS_FATFS,
 	.fs_data = &fat_fs,
 };
-
+static const char *disk_mount_pt = "/SD:";
 
 
 /*
@@ -71,41 +72,50 @@ int mount_sdcard(void)
 
 }
 
-int lsdir(const char *path)
-{
-	int res;
-	struct fs_dir_t dirp;
-	static struct fs_dirent entry;
 
-	fs_dir_t_init(&dirp);
-
-	/* Verify fs_opendir() */
-	res = fs_opendir(&dirp, path);
-	if (res) {
-		printk("Error opening dir %s [%d]\n", path, res);
-		return res;
+/*Retrieve a file path on a certain directory on the sdcard*/
+int get_sd_path(char * outpath,const char * dir, const char * filename){
+	strcpy(outpath,dir);
+	if (filename != NULL){
+		strcat(outpath,"/");
+		strcat(outpath,filename);
 	}
-
-	printk("\nListing dir %s ...\n", path);
-	for (;;) {
-		/* Verify fs_readdir() */
-		res = fs_readdir(&dirp, &entry);
-
-		/* entry.name[0] == 0 means end-of-dir */
-		if (res || entry.name[0] == 0) {
-			break;
-		}
-
-		if (entry.type == FS_DIR_ENTRY_DIR) {
-			printk("[DIR ] %s\n", entry.name);
-		} else {
-			printk("[FILE] %s (size = %zu)\n",
-				entry.name, entry.size);
-		}
-	}
-
-	/* Verify fs_closedir() */
-	fs_closedir(&dirp);
-
-	return res;
+	return FEA_SUCCES;
 }
+
+/*Reads a new line from a file*/
+ssize_t fs_gets(char * linebuffer,size_t bufsz,struct fs_file_t* fid){
+	ssize_t nread=fs_read(fid,linebuffer,bufsz);
+	if(nread < bufsz && nread >0){
+		linebuffer[nread]='\0';
+		return nread;
+	}else if (nread == bufsz){
+		/*Possibly more has been read than necessary: Find the line end*/
+		char * lnend;
+		if ((lnend=strchr(linebuffer,'\n')) == NULL){
+			/*if((lnend=strchr(linebuffer,'\r')) == NULL){*/
+				lnend=linebuffer+bufsz-1;
+			/*}*/
+		}
+		ptrdiff_t slen=lnend-linebuffer+1;
+		/*printk("slen %d\n",(int)slen);*/
+		if (slen < bufsz){
+			linebuffer[slen]='\0';
+				off_t offs=bufsz-slen;
+				/*LOG_INF("nread %d, seeking backwards with %d\n",(int)nread,(int)offs);*/
+			if (fs_seek(fid,-offs,FS_SEEK_CUR) < 0){
+				return -2;
+			}
+			return slen;
+		}else{
+			/*LOG_INF("returning full buffer\n");*/
+			return bufsz;
+		}
+	}else{
+		/*Errors and EOF's*/
+		return -1;
+	}
+	
+}
+
+

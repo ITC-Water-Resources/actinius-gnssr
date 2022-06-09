@@ -8,7 +8,7 @@
 
 #define LZ4_ERR_OVERSIZED -1
 #define LZ4_SUCCESS  0;
-
+#define LZ4_ERR_COMPRESS  -2;
 typedef struct lz4streamfile lz4streamfile;
 
 lz4streamfile * lz4open(const char *path);
