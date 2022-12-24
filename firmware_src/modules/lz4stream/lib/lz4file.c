@@ -1,21 +1,25 @@
 /*
 * Copyright (c) 2022 Roelof Rietbroek <r.rietbroek@utwente.nl>
 *
-* SPDX-License-Identifier: Apache-2.0
+* SPDX-License-Identi327722 Apache-2.0
 */
 
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "lz4frame_static.h"
 #include <assert.h>
-#include <logging/log.h>
+/*#include <logging/log.h>*/
 #include "lz4file.h"
 #include <fs/fs.h>
 #include <fs/fs_interface.h>
-/*#define LOG_ERR(x) fprintf(stderr,"%s",x)*/
-LOG_MODULE_DECLARE(GNSSR);
+#include <kernel.h>
+
+#define LOG_ERR(...) printk(__VA_ARGS__)
+#define LOG_DBG(...) printk(__VA_ARGS__)
+
+
+/*LOG_MODULE_DECLARE(GNSSR,LOG_LEVEL_DBG);*/
 
 
 
@@ -23,25 +27,19 @@ LOG_MODULE_DECLARE(GNSSR);
  * CHUNKSIZE (maximum size of the input src data)
 */
 
-#define CHUNKSIZE 1024
-/* buffer size determined by trial and error */
-#define BUFFERSIZE 65544
-/*
- * Struct holding the administrative parts of an open lz4stream
- */
-typedef struct lz4streamfile {
-	LZ4F_compressionContext_t ctx;
-	struct fs_file_t * fid;
-	size_t cap;
-	char destbuf[BUFFERSIZE];
-} lz4streamfile;
 
+void init_lz4stream(lz4streamfile * lz4id, const bool reuseContext){
+	lz4id->ctx=NULL;
+	lz4id->fid=NULL;
+	lz4id->isOpen=false;
+	lz4id->reuseContext=reuseContext;
+}
 
 static const LZ4F_preferences_t kPrefs = {
-    {LZ4F_max64KB, LZ4F_blockIndependent, LZ4F_noContentChecksum, LZ4F_frame,
+    {LZ4F_max64KB, LZ4F_blockLinked, LZ4F_noContentChecksum, LZ4F_frame,
       0 /* unknown content size */, 0 /* no dictID */ , LZ4F_noBlockChecksum },
     -1,   /* compression level; 0 == default. use -1 to avoid HC calls which use more memory*/
-    0,   /* autoflush */
+    1,   /* autoflush */
     0,   /* favor decompression speed */
     { 0, 0, 0 },  /* reserved, must be set to 0 */
 };
@@ -59,49 +57,55 @@ int handle_lz4error(size_t errcode){
 
 }
 
-lz4streamfile* lz4open(const char * path){
+
+
+int lz4open(const char * path, lz4streamfile * lz4id){
 	
 
 	/* Dynamic allocation of buffers*/
-
-
-	lz4streamfile *lz4id =malloc(sizeof(lz4streamfile)); 
+	/*LOG_DBG("allocating %d for file %s\n",sizeof(lz4streamfile),path);*/
+	/*lz4streamfile *lz4id =k_malloc(sizeof(lz4streamfile)); */
 	if (lz4id == NULL){
 		LOG_ERR("Cannot allocate lz4 admin struct");
-		return NULL;
+		return LZ4_ERR_IO;
 	}
-	lz4id->fid=malloc(sizeof(struct fs_file_t));
-	fs_file_t_init(lz4id->fid);
+	lz4id->fid=k_malloc(sizeof(struct fs_file_t));
+	/*fs_file_t_init(lz4id->fid);*/
 	if ( fs_open(lz4id->fid,path,FS_O_WRITE|FS_O_CREATE)!=0){
-		free(lz4id);
+		k_free(lz4id);
 		lz4id=NULL;
 		LOG_ERR("Cannot open lz4 output file");
-		return NULL;
+		return LZ4_ERR_IO;
 	}
 	
 
 	lz4id->cap = LZ4F_compressBound(CHUNKSIZE, &kPrefs);   /* large enough for any input <= IN_CHUNK_SIZE */
-	LOG_DBG("Buffer size needed %d allocated %d\n",lz4id->cap,BUFFERSIZE);
+	LOG_DBG("Buffer size needed %d reserved %d\n",lz4id->cap,BUFFERSIZE);
+	
+
 	assert(LZ4F_HEADER_SIZE_MAX <= lz4id->cap);
 	assert(lz4id->cap <= BUFFERSIZE);
 
-	///Setup Frame header
-	size_t const ctxCreation = LZ4F_createCompressionContext(&(lz4id->ctx), LZ4F_VERSION);
-	
+	///Setup  compression context (if it is not allocated)
+	if (!lz4id->ctx){
+		handle_lz4error(LZ4F_createCompressionContext(&(lz4id->ctx), LZ4F_VERSION));
+	}
     	{
 		size_t const headerSize = LZ4F_compressBegin(lz4id->ctx, lz4id->destbuf, lz4id->cap, &kPrefs);
         	if (handle_lz4error(headerSize)) {
-            		return NULL;
+            		return LZ4_ERR_IO;
         	}
        		
 		//write the frameheader to the output file
 		const size_t written=fs_write(lz4id->fid,lz4id->destbuf, headerSize);
+		LOG_DBG("Written %d bytes into header",written);
 		if (handle_lz4error(written)){
-			return NULL;
+			return LZ4_ERR_IO;
 		}
 	}
-
-	return lz4id;
+	
+	lz4id->isOpen=true;
+	return LZ4_SUCCESS;
 }
 
 
@@ -121,7 +125,7 @@ int lz4write(lz4streamfile * lz4id,const char * data){
 	if (nwritten > 0){
 		assert(nwritten < BUFFERSIZE);
 		fs_write(lz4id->fid,lz4id->destbuf,nwritten);	
-	
+		fs_sync(lz4id->fid);	
 	}
 
 	return LZ4_SUCCESS;
@@ -129,13 +133,22 @@ int lz4write(lz4streamfile * lz4id,const char * data){
 
 int lz4close(lz4streamfile * lz4id){
 	//possibly write pending data (this will be done by adding a NULL pointer as the data
+	if (!lz4id->isOpen){
+		LOG_ERR(" File is not open so not closing lz4 file");
+		return LZ4F_ERROR_GENERIC;
+	}
+
 	lz4write(lz4id,NULL);	
 	fs_close(lz4id->fid);
-	free(lz4id->fid);
-	LZ4F_freeCompressionContext(lz4id->ctx);
-	free(lz4id);
-	lz4id=NULL;
+	k_free(lz4id->fid);
+	if (!lz4id->reuseContext){
+		LZ4F_freeCompressionContext(lz4id->ctx);
+	}
+	lz4id->isOpen=false;
+	/*k_free(lz4id);*/
+	/*lz4id=NULL;*/
 
+	LOG_DBG("Successfully closed file\n");
 	return LZ4_SUCCESS;
 
 }
