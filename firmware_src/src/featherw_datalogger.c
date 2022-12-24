@@ -6,15 +6,24 @@ refactored and modified from the fat_fs zephyr example by Tavish Naruka <tavishn
 */
 
 #include <device.h>
-#include <storage/disk_access.h>
+#include <disk/disk_access.h>
 #include <fs/fs.h>
 #include <ff.h>
 #include <fs/fs_interface.h>
-#include <logging/log.h>
+#include <string.h>
+
+
 #include "featherw_datalogger.h"
 #include <sys/types.h>
 
-LOG_MODULE_DECLARE(GNSSR);
+/*#include <logging/log.h>*/
+/*LOG_MODULE_DECLARE(GNSSR,LOG_LEVEL_DBG);*/
+
+
+/* temporary workaround using the logger*/
+#define LOG_ERR(...) printk(__VA_ARGS__)
+#define LOG_DBG(...) printk(__VA_ARGS__)
+#define LOG_INF(...) printk(__VA_ARGS__)
 
 static FATFS fat_fs;
 /* mounting info */
@@ -23,7 +32,7 @@ static struct fs_mount_t mp = {
 	.fs_data = &fat_fs,
 };
 static const char *disk_mount_pt = "/SD:";
-
+static const char *sddata= "/SD:/data";
 
 /*
 *  Note the fatfs library is able to mount only strings inside _VOLUME_STRS
@@ -55,23 +64,23 @@ int mount_sdcard(void)
 		LOG_ERR("Unable to get sector size");
 		return FEA_ERR_SECSIZE;
 	}
-	printk("Sector size %u\n", block_size);
+	LOG_DBG("Sector size %u\n", block_size);
 
 	memory_size_mb = (uint64_t)block_count * block_size;
-	printk("Memory Size(MB) %u\n", (uint32_t)(memory_size_mb >> 20));
+	LOG_DBG("Memory Size(MB) %u\n", (uint32_t)(memory_size_mb >> 20));
 
 	mp.mnt_point = disk_mount_pt;
 
 	int res = fs_mount(&mp);
 
 	if (res == FR_OK) {
-		return FEA_SUCCES;
+		return FEA_SUCCESS;
 	} else {
+		LOG_ERR("Unable to mount SD card");
 		return FEA_ERR_MOUNT;
 	}
 
 }
-
 
 /*Retrieve a file path on a certain directory on the sdcard*/
 int get_sd_path(char * outpath,const char * dir, const char * filename){
@@ -80,7 +89,45 @@ int get_sd_path(char * outpath,const char * dir, const char * filename){
 		strcat(outpath,"/");
 		strcat(outpath,filename);
 	}
-	return FEA_SUCCES;
+	return FEA_SUCCESS;
+}
+
+int get_sd_data_path(char * outpath, const char * filename){
+	return get_sd_path(outpath,sddata, filename);
+	
+}
+
+/* initialize directories if they do not exist*/
+int initialize_sdcard_files(void){
+	char dir[100];
+	get_sd_data_path(dir,NULL);
+	if (!file_exists(dir)){
+		int stat=fs_mkdir(dir);	
+		if (stat  == 0){
+			return FEA_SUCCESS;
+		}
+
+		
+	}else{
+		return FEA_SUCCESS;
+	}
+
+	return FEA_ERR_INIT;
+
+}
+
+
+
+
+bool file_exists(const char * path){
+
+	struct fs_dirent entry;
+	if (fs_stat(path,&entry)== 0){
+		return true;	
+	}else{
+		return false;
+	}
+
 }
 
 /*Reads a new line from a file*/

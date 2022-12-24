@@ -15,14 +15,34 @@ together with an Adafruit featherwing data logger
 ## TODO:Hardware
 1. Assemble battery, charger and solar panel, and case
 
+# Steps for building the firmware (command line version)
+## Setting up the software development kit and installing a dedicated python virtual environment
+Building this firmware requires [installing the Software development Kit from Nordic](https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/nrf/getting_started.html). Which is an extended version of the Zephyr development kit. For the discussion here, it is assumed that the development kit is installed in he user's home under ncs `${HOME]/ncs`.
+
+The current stack was build by setting up a dedicated python environment [using the command line interface to the zephyr buidl system](https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/nrf/gs_installing.html#set-up-the-command-line-build-environment)
+Once a new python environment is created `python -m venv pynrf` in the users home, one can add the following to the bottom of ${HOME}/pynrf/bin/activate
+```
 
 
-# Building the firmware
-Building this firmware requires [installing the Software development Kit from Nordic](https://developer.nordicsemi.com/nRF_Connect_SDK/doc/latest/nrf/getting_started.html). Which is an extended version of the Zephyr development kit
+## added by RR
+source ${VIRTUAL_ENV}/nrfenvs
+```
+The file `nrfsenvs` should be constructed in `${HOME}/pynrf/bin` and contains instructions to find the zephyr-sdk environment and the toolchain:
+```
+source /home/roelof/ncs/zephyr/zephyr-env.sh
+```
+
+## Building the firmware 
+From a terminal which has loaded the `pynrf` environment, change to the `firmware_src` directory of this repository and execute
 `west build -b actinius_icarus_ns -d build`
+or 
 
-# Upload firmware using mcumgr
-`mcumgr --conntype="serial" --connstring="dev=/dev/ttyUSB0,baud=115200" image upload app_update.bin`
+`west build -b actinius_icarus_ns -d build --pristine` When all the filed in the build directory needs to be overwritten
+If all goes well, this should create a new firmware image `firmware_src/build/zephyr/app_update.bin` 
+
+# Uploading firmware using mcumgr
+You can now upload the firmware to the actinius board using `mcumgr`
+`mcumgr --conntype="serial" --connstring="dev=/dev/ttyUSB0,baud=115200" image upload build/zephyr/app_update.bin`
 
 
 # checking the uart serial output on linux
@@ -35,3 +55,8 @@ The correct settings are:
 - parity: None
 - Flow control: None
 
+
+#Device info:
+Application version: 1.4.4
+Modem firmware version: mfw_nrf9160_1.2.3
+[nrf Buildchain used in this version] (https://developer.nordicsemi.com/nRF_Connect_SDK/doc/1.5.1/nrf/index.html) 

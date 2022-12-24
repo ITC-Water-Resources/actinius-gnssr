@@ -1,0 +1,35 @@
+#
+# Copyright (c) 2022 Roelof Rietbroek
+#
+#
+
+menu "GNSS-reflectometer"
+
+config GNSS_MIN_ELEV
+        int "Minimum elevation angle for GNSS satellites"
+        range 0 90
+        default 2
+        help
+          Cutoff elevation angle for GNSS satellites.
+
+#config GNSS_SAMPLE_LOW_ACCURACY
+	#bool "Allow low accuracy fixes"
+	#help
+	  #Allows fixes with lower accuracy.
+
+endmenu
+
+menu "Zephyr Kernel"
+source "Kconfig.zephyr"
+endmenu
+
+#antenna settings
+#source "${NRF_BASE}/lib/modem_antenna/Kconfig"
+
+#source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
+
+
+module = GNSSR
+module-str = GNSS reflectometer
+
+#source "${ZEPHYR_BASE}/subsys/net/Kconfig"
