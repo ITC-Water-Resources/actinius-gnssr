@@ -13,7 +13,7 @@ Modified by Roelof Rietbroek (r.rietbroek@utwente.nl) to
 #include <modem/at_cmd.h>
 #include <modem/at_notif.h>
 #include "featherw_datalogger.h"
-
+#include <drivers/gpio.h>
 #include "lz4file.h"
 
 #ifdef CONFIG_SUPL_CLIENT_LIB
@@ -35,6 +35,11 @@ Modified by Roelof Rietbroek (r.rietbroek@utwente.nl) to
 
 #define AT_MAGPIO      "AT\%XMAGPIO=1,0,0,1,1,1574,1577"
 
+
+#define STACKSIZE 1024
+#define PRIORITY 7
+
+
 static const char update_indicator[] = {'\\', '|', '/', '-'};
 static const char *const at_commands[] = {
 	AT_XSYSTEMMODE,
@@ -48,6 +53,7 @@ static bool                  got_fix;
 static uint64_t                 fix_timestamp;
 static uint64_t                 log_timestamp;
 static nrf_gnss_data_frame_t last_pvt;
+
 
 K_SEM_DEFINE(lte_ready, 0, 1);
 
@@ -67,6 +73,134 @@ static int setup_modem(void)
 
 	return 0;
 }
+
+/* LED and button stuff */
+
+#define LED_ERROR 0
+#define LED_SEARCHING  1
+#define LED_LOGGING  2
+#define LED_UPLOADING 3
+
+#define RED_LED_PIN		DT_GPIO_PIN(DT_NODELABEL(red_led), gpios)
+#define GREEN_LED_PIN		DT_GPIO_PIN(DT_NODELABEL(green_led), gpios)
+#define BLUE_LED_PIN		DT_GPIO_PIN(DT_NODELABEL(blue_led), gpios)
+
+#define BUTTON_NODE    		DT_NODELABEL(button0)
+#define BUTTON_GPIO_LABEL	DT_GPIO_LABEL(BUTTON_NODE, gpios)
+#define BUTTON_GPIO_PIN		DT_GPIO_PIN(BUTTON_NODE, gpios)
+#define BUTTON_GPIO_FLAGS	GPIO_INPUT | DT_GPIO_FLAGS(BUTTON_NODE, gpios)
+
+#define LED_ON 0
+#define LED_OFF !LED_ON
+
+static struct device *gpio_dev;
+static struct gpio_callback gpio_cb;
+
+static int led_status= LED_SEARCHING;
+static bool button_pressed=false;
+
+void button_pressed_callback(const struct device *gpiob, struct gpio_callback *cb, gpio_port_pins_t pins)
+{
+	button_pressed = true;
+}
+
+bool init_button(void)
+{
+	int ret = gpio_pin_configure(gpio_dev, BUTTON_GPIO_PIN, BUTTON_GPIO_FLAGS);
+	if (ret != 0) {
+        printk("Error %d: failed to configure %s pin %d\n",
+            	ret, BUTTON_GPIO_LABEL, BUTTON_GPIO_PIN);
+        
+		return false;
+    }
+
+    ret = gpio_pin_interrupt_configure(gpio_dev,
+                                       BUTTON_GPIO_PIN,
+                                       GPIO_INT_EDGE_TO_ACTIVE);
+    if (ret != 0) {
+        printk("Error %d: failed to configure interrupt on %s pin %d\n",
+               ret, BUTTON_GPIO_LABEL, BUTTON_GPIO_PIN);
+
+        return false;
+    }
+
+    gpio_init_callback(&gpio_cb, button_pressed_callback, BIT(BUTTON_GPIO_PIN));
+    gpio_add_callback(gpio_dev, &gpio_cb);
+
+	return true;
+}
+
+
+void init_leds(void)
+{
+	gpio_pin_configure(gpio_dev, RED_LED_PIN, GPIO_OUTPUT_HIGH);
+	gpio_pin_configure(gpio_dev, GREEN_LED_PIN, GPIO_OUTPUT_HIGH);
+	gpio_pin_configure(gpio_dev, BLUE_LED_PIN, GPIO_OUTPUT_HIGH);
+
+	turn_leds_off();
+
+}
+
+void turn_leds_off(void)
+{
+	gpio_pin_set(gpio_dev, RED_LED_PIN, LED_OFF);
+	gpio_pin_set(gpio_dev, GREEN_LED_PIN, LED_OFF);
+	gpio_pin_set(gpio_dev, BLUE_LED_PIN, LED_OFF);
+}
+
+void led_button_checker(void){
+	k_sleep(K_MSEC(1000));
+
+	gpio_dev = device_get_binding(DT_LABEL(DT_NODELABEL(gpio0)));
+
+	if (!gpio_dev) {
+		printk("Error getting GPIO device binding\r\n");
+
+		return false;
+	}
+
+	if (!init_button()) {
+		return false;
+	}
+
+	init_leds();
+
+
+	while(1){
+		switch (led_status){
+		case LED_SEARCHING:
+			/*blinking yellow for a second every 5 seconds*/	
+			gpio_pin_set(gpio_dev, RED_LED_PIN, LED_ON);
+			gpio_pin_set(gpio_dev, GREEN_LED_PIN, LED_ON);
+			k_sleep(K_MSEC(1000));
+			turn_leds_off();
+			k_sleep(K_MSEC(4000));
+			break;
+		case LED_LOGGING:
+			/*blinking green for a quarter second every 2 seconds*/	
+			gpio_pin_set(gpio_dev, GREEN_LED_PIN, LED_ON);
+			k_sleep(K_MSEC(250));
+			turn_leds_off();
+			k_sleep(K_MSEC(1750));
+			break;
+		case LED_ERROR:
+			/*blinking red a second every 10 seconds*/	
+			gpio_pin_set(gpio_dev, RED_LED_PIN, LED_ON);
+			k_sleep(K_MSEC(1000));
+			turn_leds_off();
+			k_sleep(K_MSEC(9000));
+			break;
+		default:
+			k_sleep(K_MSEC(100));
+			break;
+		}
+
+	}
+
+}
+
+K_THREAD_DEFINE(led_button_checker_id, STACKSIZE, led_button_checker, NULL, NULL, NULL,
+		PRIORITY, 0, 0);
 
 #ifdef CONFIG_SUPL_CLIENT_LIB
 /* Accepted network statuses read from modem */
@@ -120,10 +254,13 @@ static int gnss_ctrl(uint32_t ctrl)
 	nrf_gnss_fix_retry_t    fix_retry    = 0;
 	nrf_gnss_fix_interval_t fix_interval = 1;
 	nrf_gnss_delete_mask_t	delete_mask  = 0;
+	/*nrf_gnss_nmea_mask_t	nmea_mask    = NRF_GNSS_NMEA_GSV_MASK |*/
+					       /*NRF_GNSS_NMEA_GSA_MASK |*/
+					       /*NRF_GNSS_NMEA_GLL_MASK |*/
+					       /*NRF_GNSS_NMEA_GGA_MASK |*/
+					       /*NRF_GNSS_NMEA_RMC_MASK;*/
+	/* we're only interested in the RMC and GSV messages at the moment*/
 	nrf_gnss_nmea_mask_t	nmea_mask    = NRF_GNSS_NMEA_GSV_MASK |
-					       NRF_GNSS_NMEA_GSA_MASK |
-					       NRF_GNSS_NMEA_GLL_MASK |
-					       NRF_GNSS_NMEA_GGA_MASK |
 					       NRF_GNSS_NMEA_RMC_MASK;
 
 	if (ctrl == GNSS_INIT_AND_START) {
@@ -326,7 +463,7 @@ int rollover_lz4log(lz4streamfile * lz4fid){
 
 }
 
-static const int fixes_per_log=50;
+/*static const int fixes_per_log=50;*/
 static int fix_counter=0;
 
 int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
@@ -345,26 +482,35 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 			bool log_rollover =false;
 			
 			log_rollover = gnss_data->pvt.datetime.day != last_pvt.pvt.datetime.day;
-
+			if (!log_rollover && button_pressed){
+				/* force log rollover when button is pressed */
+				log_rollover=true;
+			}
 			/*log_rollover = (fix_counter)%fixes_per_log == 0;*/
 
 			memcpy(&last_pvt,
 			       gnss_data,
 			       sizeof(nrf_gnss_data_frame_t));
 			got_fix = false;
+			led_status=LED_SEARCHING;
 
 			if ((gnss_data->pvt.flags &
 				NRF_GNSS_PVT_FLAG_FIX_VALID_BIT)
 				== NRF_GNSS_PVT_FLAG_FIX_VALID_BIT) {
 
 				got_fix = true;
+				led_status=LED_LOGGING;
 				fix_timestamp = k_uptime_get();
 				++fix_counter;
 				if (log_rollover){
 					print_housekeeping_data(&last_pvt);
 					rollover_lz4log(lz4fid);
+					//possibly reset button after log rollover
+					button_pressed=false;
 				}
 
+			}else{
+				led_status=LED_SEARCHING;
 			}
 			break;
 
@@ -436,7 +582,6 @@ int inject_agps_type(void *agps,
 
 
 
-
 int main(void)
 {
 	nrf_gnss_data_frame_t gnss_data;
@@ -456,10 +601,16 @@ int main(void)
 
 	if (mount_sdcard() != FEA_SUCCESS){
 
+		led_status=LED_ERROR;
+		/* wait for 30 seconds to retry and possibly notify user through led*/
+		k_sleep(K_MSEC(30000));
 		return -1;
 	}
 
 	if (initialize_sdcard_files() != FEA_SUCCESS){
+		led_status=LED_ERROR;
+		/* wait for 30 seconds to retry and possibly notify user through led*/
+		k_sleep(K_MSEC(30000));
 		return -1;
 	}
 	
@@ -467,6 +618,9 @@ int main(void)
 	printk("Starting GNSS-R logger application\n");
 
 	if (init_app() != 0) {
+		led_status=LED_ERROR;
+		/* wait for 30 seconds to retry and possibly notify user through led*/
+		k_sleep(K_MSEC(30000));
 		return -1;
 	}
 

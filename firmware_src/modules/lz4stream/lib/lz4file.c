@@ -23,9 +23,6 @@
 
 
 
-/*
- * CHUNKSIZE (maximum size of the input src data)
-*/
 
 
 void init_lz4stream(lz4streamfile * lz4id, const bool reuseContext){
@@ -33,13 +30,14 @@ void init_lz4stream(lz4streamfile * lz4id, const bool reuseContext){
 	lz4id->fid=NULL;
 	lz4id->isOpen=false;
 	lz4id->reuseContext=reuseContext;
+	lz4id->nsrcdata=0;
 }
 
 static const LZ4F_preferences_t kPrefs = {
     {LZ4F_max64KB, LZ4F_blockLinked, LZ4F_noContentChecksum, LZ4F_frame,
       0 /* unknown content size */, 0 /* no dictID */ , LZ4F_noBlockChecksum },
     -1,   /* compression level; 0 == default. use -1 to avoid HC calls which use more memory*/
-    1,   /* autoflush */
+    1,   /* autoflush*/
     0,   /* favor decompression speed */
     { 0, 0, 0 },  /* reserved, must be set to 0 */
 };
@@ -111,21 +109,55 @@ int lz4open(const char * path, lz4streamfile * lz4id){
 
 int lz4write(lz4streamfile * lz4id,const char * data){
 	size_t nwritten=0;
-	if (data == NULL){
-		///no more data-> end compression
-		nwritten = LZ4F_compressEnd(lz4id->ctx,lz4id->destbuf,lz4id->cap,NULL);
-		
-	}else{
-		const int ndata=strlen(data);
-		nwritten = LZ4F_compressUpdate(lz4id->ctx,lz4id->destbuf,lz4id->cap,data,ndata,NULL);
+
+	int ndata=0;
+
+	if (data != NULL){
+		ndata=strlen(data);
 	}
+
+	/* compress srcbuffer if end of file or when new data does not fit */
+
+	if (CHUNKSIZE < (ndata +lz4id->nsrcdata) || (data == NULL && lz4id->nsrcdata > 0) ){
+
+		nwritten=LZ4F_compressUpdate(lz4id->ctx,lz4id->destbuf,lz4id->cap,lz4id->srcbuf,lz4id->nsrcdata,NULL);
+		lz4id->nsrcdata=0;
+
+		if (nwritten > 0){
+			/* write compressed bytes to file if needed*/
+			assert(nwritten < BUFFERSIZE);
+			fs_write(lz4id->fid,lz4id->destbuf,nwritten);	
+			fs_sync(lz4id->fid);
+		}
+		if (handle_lz4error(nwritten)){
+			return LZ4_ERR_COMPRESS;
+		}
+	}
+
+
+	/*copy new data to the end of srcbuffer */
+	if (ndata > 0){
+		assert(ndata < CHUNKSIZE);
+		memcpy(&(lz4id->srcbuf[lz4id->nsrcdata]),data,ndata);
+		lz4id->nsrcdata+=ndata;
+
+	}
+
+
+	
+	/* possibly finalize file */
+	if (data == NULL){
+		/* Now end the compression frame*/
+		nwritten=LZ4F_compressEnd(lz4id->ctx,lz4id->destbuf,lz4id->cap,NULL);
+		if (nwritten > 0){
+			assert(nwritten < BUFFERSIZE);
+			fs_write(lz4id->fid,lz4id->destbuf,nwritten);	
+			fs_sync(lz4id->fid);
+		}
+	}
+
 	if (handle_lz4error(nwritten)){
 		return LZ4_ERR_COMPRESS;
-	}
-	if (nwritten > 0){
-		assert(nwritten < BUFFERSIZE);
-		fs_write(lz4id->fid,lz4id->destbuf,nwritten);	
-		fs_sync(lz4id->fid);	
 	}
 
 	return LZ4_SUCCESS;
@@ -161,12 +193,22 @@ int lz4close(lz4streamfile * lz4id){
 	/*char * inpf="./orig.txt";*/
 	/*size_t bufsz=82;*/
 	/*char *linebuf=NULL;*/
-	/*struct lz4streamfile * lz4id=lz4open(filename);*/
+	
+
+
+	/*static struct lz4streamfile lz4fid ;*/
+	/*init_lz4stream(&lz4fid,true);*/
+	/*if (lz4open(filename,lz4fid) != LZ4_SUCCESS){*/
+	
+		/*return -1;*/
+	/*}*/
+	
+
 	/*FILE* fin=fopen(inpf,"rt");*/
 
 
 	/*int line_size = getline(&linebuf, &bufsz, fin);*/
-	/*lz4write(lz4id,linebuf);*/
+	/*lz4write(lz4fid,linebuf);*/
 	  /*while (line_size >= 0)*/
 	  /*{*/
 		    /*line_size = getline(&linebuf, &bufsz, fin);*/

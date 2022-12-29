@@ -11,6 +11,10 @@
 #define LZ4_ERR_COMPRESS  -2
 #define LZ4_ERR_IO -3
 
+/*
+ * CHUNKSIZE (maximum size of the input src data)
+*/
+
 #define CHUNKSIZE 4096
 /* buffer size determined by trial and error */
 #define BUFFERSIZE 4200 
@@ -27,6 +31,8 @@ typedef struct lz4streamfile {
 	struct fs_file_t * fid;
 	size_t cap;
 	char destbuf[BUFFERSIZE];
+	char srcbuf[CHUNKSIZE];
+	int nsrcdata;
 	bool isOpen;
         bool reuseContext;
 }lz4streamfile;
