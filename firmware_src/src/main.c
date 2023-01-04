@@ -1,9 +1,9 @@
 /*
- * Copyright (c) 2019 Nordic Semiconductor ASA
+ * Copyright (c) 2022 Roelof Rietbroek, with segments from Nordic Semiconductor zephyr sample codes
  *
  * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
  
-Modified by Roelof Rietbroek (r.rietbroek@utwente.nl) to 
+ Roelof Rietbroek (r.rietbroek@utwente.nl)  
 */
 
 #include <zephyr.h>
@@ -15,6 +15,7 @@ Modified by Roelof Rietbroek (r.rietbroek@utwente.nl) to
 #include "featherw_datalogger.h"
 #include <drivers/gpio.h>
 #include "lz4file.h"
+#include "config.h"
 
 #ifdef CONFIG_SUPL_CLIENT_LIB
 #include <supl_os_client.h>
@@ -54,6 +55,9 @@ static uint64_t                 fix_timestamp;
 static uint64_t                 log_timestamp;
 static nrf_gnss_data_frame_t last_pvt;
 
+/* config with defaults */
+/*static struct config confdata={"",0,{"","",""}};*/
+static struct config confdata;
 
 K_SEM_DEFINE(lte_ready, 0, 1);
 
@@ -131,6 +135,13 @@ bool init_button(void)
 }
 
 
+void turn_leds_off(void)
+{
+	gpio_pin_set(gpio_dev, RED_LED_PIN, LED_OFF);
+	gpio_pin_set(gpio_dev, GREEN_LED_PIN, LED_OFF);
+	gpio_pin_set(gpio_dev, BLUE_LED_PIN, LED_OFF);
+}
+
 void init_leds(void)
 {
 	gpio_pin_configure(gpio_dev, RED_LED_PIN, GPIO_OUTPUT_HIGH);
@@ -141,14 +152,8 @@ void init_leds(void)
 
 }
 
-void turn_leds_off(void)
-{
-	gpio_pin_set(gpio_dev, RED_LED_PIN, LED_OFF);
-	gpio_pin_set(gpio_dev, GREEN_LED_PIN, LED_OFF);
-	gpio_pin_set(gpio_dev, BLUE_LED_PIN, LED_OFF);
-}
 
-void led_button_checker(void){
+int led_button_checker(void){
 	k_sleep(K_MSEC(1000));
 
 	gpio_dev = device_get_binding(DT_LABEL(DT_NODELABEL(gpio0)));
@@ -156,11 +161,11 @@ void led_button_checker(void){
 	if (!gpio_dev) {
 		printk("Error getting GPIO device binding\r\n");
 
-		return false;
+		return -1;
 	}
 
 	if (!init_button()) {
-		return false;
+		return -1;
 	}
 
 	init_leds();
@@ -177,11 +182,11 @@ void led_button_checker(void){
 			k_sleep(K_MSEC(4000));
 			break;
 		case LED_LOGGING:
-			/*blinking green for a quarter second every 2 seconds*/	
+			/*flash green for a 10th of a second second every 2 seconds*/	
 			gpio_pin_set(gpio_dev, GREEN_LED_PIN, LED_ON);
-			k_sleep(K_MSEC(250));
+			k_sleep(K_MSEC(100));
 			turn_leds_off();
-			k_sleep(K_MSEC(1750));
+			k_sleep(K_MSEC(1900));
 			break;
 		case LED_ERROR:
 			/*blinking red a second every 10 seconds*/	
@@ -191,11 +196,13 @@ void led_button_checker(void){
 			k_sleep(K_MSEC(9000));
 			break;
 		default:
-			k_sleep(K_MSEC(100));
+			/* shouldn't occur really, but allow sleep so this function does not spin */
+			k_sleep(K_MSEC(1000));
 			break;
 		}
 
 	}
+	return 0;
 
 }
 
@@ -254,15 +261,14 @@ static int gnss_ctrl(uint32_t ctrl)
 	nrf_gnss_fix_retry_t    fix_retry    = 0;
 	nrf_gnss_fix_interval_t fix_interval = 1;
 	nrf_gnss_delete_mask_t	delete_mask  = 0;
-	/*nrf_gnss_nmea_mask_t	nmea_mask    = NRF_GNSS_NMEA_GSV_MASK |*/
-					       /*NRF_GNSS_NMEA_GSA_MASK |*/
-					       /*NRF_GNSS_NMEA_GLL_MASK |*/
-					       /*NRF_GNSS_NMEA_GGA_MASK |*/
-					       /*NRF_GNSS_NMEA_RMC_MASK;*/
-	/* we're only interested in the RMC and GSV messages at the moment*/
-	nrf_gnss_nmea_mask_t	nmea_mask    = NRF_GNSS_NMEA_GSV_MASK |
-					       NRF_GNSS_NMEA_RMC_MASK;
+	nrf_gnss_nmea_mask_t	nmea_mask    = NRF_GNSS_NMEA_GSV_MASK | NRF_GNSS_NMEA_RMC_MASK ;
+	
+	/* allow low elevation tracking */
+	nrf_gnss_elevation_mask_t gnss_lowelev = 2;
 
+	nrf_setsockopt(gnss_fd, NRF_SOL_GNSS, NRF_SO_GNSS_FIX_INTERVAL, &fix_interval, sizeof(fix_interval));					       NRF_GNSS_NMEA_RMC_MASK;
+
+	
 	if (ctrl == GNSS_INIT_AND_START) {
 		gnss_fd = nrf_socket(NRF_AF_LOCAL,
 				     NRF_SOCK_DGRAM,
@@ -302,6 +308,16 @@ static int gnss_ctrl(uint32_t ctrl)
 					sizeof(nmea_mask));
 		if (retval != 0) {
 			printk("Failed to set nmea mask\n");
+			return -1;
+		}
+		
+		retval = nrf_setsockopt(gnss_fd,
+					NRF_SOL_GNSS,
+					NRF_SO_GNSS_ELEVATION_MASK,
+					&gnss_lowelev,
+					sizeof(gnss_lowelev));
+		if (retval != 0) {
+			printk("Failed to set low elevation mask\n");
 			return -1;
 		}
 	}
@@ -425,10 +441,11 @@ static void print_housekeeping_data(nrf_gnss_data_frame_t *pvt_data)
 int rollover_lz4log(lz4streamfile * lz4fid){
 
 	int nthfile;
-	char filenamebase[30];
-	char lz4fout[80];
-	for (nthfile=0;nthfile < 100;++nthfile){	
-		sprintf(filenamebase,"nmealog_%04u-%02u-%02u_%02d.lz4",
+	char filenamebase[50];
+	char lz4fout[100];
+	for (nthfile=0;nthfile < 100;++nthfile){
+		sprintf(filenamebase,"%s_%04u-%02u-%02u_%02d.lz4",
+					confdata.filebase,
 					last_pvt.pvt.datetime.year,
 					last_pvt.pvt.datetime.month,
 					last_pvt.pvt.datetime.day,nthfile);
@@ -486,6 +503,8 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 				/* force log rollover when button is pressed */
 				log_rollover=true;
 			}
+
+
 			/*log_rollover = (fix_counter)%fixes_per_log == 0;*/
 
 			memcpy(&last_pvt,
@@ -502,7 +521,7 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 				led_status=LED_LOGGING;
 				fix_timestamp = k_uptime_get();
 				++fix_counter;
-				if (log_rollover){
+				if (log_rollover || !lz4fid->isOpen){
 					print_housekeeping_data(&last_pvt);
 					rollover_lz4log(lz4fid);
 					//possibly reset button after log rollover
@@ -600,27 +619,27 @@ int main(void)
 	printk("Mounting and initializing featherwing sdcard\n");
 
 	if (mount_sdcard() != FEA_SUCCESS){
-
 		led_status=LED_ERROR;
-		/* wait for 30 seconds to retry and possibly notify user through led*/
-		k_sleep(K_MSEC(30000));
 		return -1;
 	}
 
 	if (initialize_sdcard_files() != FEA_SUCCESS){
 		led_status=LED_ERROR;
-		/* wait for 30 seconds to retry and possibly notify user through led*/
-		k_sleep(K_MSEC(30000));
 		return -1;
 	}
-	
+
+	printk("conf data before %p %s\n",&confdata,confdata.filebase);
+	/* read configuration */
+	if (read_config(&confdata) != CONF_SUCCESS){
+		led_status=LED_ERROR;
+		return -1;
+	}
 
 	printk("Starting GNSS-R logger application\n");
+	printk("confdata after %s \n",confdata.webdav.rooturl);
 
 	if (init_app() != 0) {
 		led_status=LED_ERROR;
-		/* wait for 30 seconds to retry and possibly notify user through led*/
-		k_sleep(K_MSEC(30000));
 		return -1;
 	}
 
@@ -635,6 +654,7 @@ int main(void)
 	init_lz4stream(&lz4fid,true);
 		
 	printk("Getting GNSS data...\n");
+	last_pvt.pvt.datetime.day=0; ///Ensure that log will be rotated on first passs throug
 	while (1) {
 
 		do {

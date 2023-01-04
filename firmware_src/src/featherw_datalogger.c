@@ -33,6 +33,7 @@ static struct fs_mount_t mp = {
 };
 static const char *disk_mount_pt = "/SD:";
 static const char *sddata= "/SD:/data";
+static const char *sdconfig= "/SD:/config";
 
 /*
 *  Note the fatfs library is able to mount only strings inside _VOLUME_STRS
@@ -92,6 +93,11 @@ int get_sd_path(char * outpath,const char * dir, const char * filename){
 	return FEA_SUCCESS;
 }
 
+int get_sd_config_path(char * outpath, const char * filename){
+	return get_sd_path(outpath,sdconfig, filename);
+	
+}
+
 int get_sd_data_path(char * outpath, const char * filename){
 	return get_sd_path(outpath,sddata, filename);
 	
@@ -103,16 +109,21 @@ int initialize_sdcard_files(void){
 	get_sd_data_path(dir,NULL);
 	if (!file_exists(dir)){
 		int stat=fs_mkdir(dir);	
-		if (stat  == 0){
-			return FEA_SUCCESS;
+		if (stat  != 0){
+			return FEA_ERR_INIT;
 		}
-
-		
-	}else{
-		return FEA_SUCCESS;
 	}
-
-	return FEA_ERR_INIT;
+		
+	/* also intialize config directory */
+	get_sd_config_path(dir,NULL);
+	if (!file_exists(dir)){
+		int stat=fs_mkdir(dir);	
+		if (stat  != 0){
+			return FEA_ERR_INIT;
+		}
+	}
+		
+	return FEA_SUCCESS;
 
 }
 

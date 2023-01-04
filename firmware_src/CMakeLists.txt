@@ -18,7 +18,7 @@ set(DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/actinius_icarus.overlay)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(gnssr_logger)
 
-zephyr_library_sources(src/main.c src/featherw_datalogger.c)
+zephyr_library_sources(src/main.c src/featherw_datalogger.c src/config.c)
 
 zephyr_library_sources_ifdef(
   CONFIG_SUPL_CLIENT_LIB

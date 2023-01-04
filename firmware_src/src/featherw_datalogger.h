@@ -9,6 +9,7 @@
 
 #include <fs/fs_interface.h>
 #include <sys/types.h>
+#include <stdbool.h>
 
 /* 
  * ERROR CODES
@@ -25,9 +26,6 @@
 #define FEA_ERR_MOUNT -4
 
 
-//static const char *sdroot="/SD:/";
-//static const char *sdconfig= "/SD:/config";
-//static const char *sdtest= "/SD:/tests";
 /*
  * Forward declare routines
  */
@@ -37,6 +35,7 @@ int mount_sdcard(void);
 int initialize_sdcard_files(void);
 
 int get_sd_data_path(char * outpath, const char * filename);
+int get_sd_config_path(char * outpath, const char * filename);
 
 ssize_t fs_gets(char * linebuffer,size_t bufsz,struct fs_file_t* fid);
 
