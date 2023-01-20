@@ -21,6 +21,10 @@ project(gnssr_logger)
 zephyr_library_sources(src/main.c src/featherw_datalogger.c src/config.c)
 
 zephyr_library_sources_ifdef(
+  CONFIG_UPLOAD_CLIENT
+  src/httpclnt.c
+)
+zephyr_library_sources_ifdef(
   CONFIG_SUPL_CLIENT_LIB
   src/supl_support.c
 )

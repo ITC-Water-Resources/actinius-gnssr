@@ -12,6 +12,15 @@ config GNSS_MIN_ELEV
         help
           Cutoff elevation angle for GNSS satellites.
 
+config UPLOAD_CLIENT
+	bool "Enable file uploads"
+	select MODEM_KEY_MGMT
+        depends on HTTP_CLIENT
+        depends on AT_CMD_PARSER
+        depends on NRF_MODEM_LIB
+        help
+	  Allows uploading of data files to webdav folder
+
 #config GNSS_SAMPLE_LOW_ACCURACY
 	#bool "Allow low accuracy fixes"
 	#help
@@ -26,10 +35,11 @@ endmenu
 #antenna settings
 #source "${NRF_BASE}/lib/modem_antenna/Kconfig"
 
-#source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
 
 
 module = GNSSR
 module-str = GNSS reflectometer
+source "subsys/logging/Kconfig.template.log_config"
 
+#source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
 #source "${ZEPHYR_BASE}/subsys/net/Kconfig"

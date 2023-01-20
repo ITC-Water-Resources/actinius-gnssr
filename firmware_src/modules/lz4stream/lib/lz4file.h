@@ -32,6 +32,7 @@ typedef struct lz4streamfile {
 	size_t cap;
 	char destbuf[BUFFERSIZE];
 	char srcbuf[CHUNKSIZE];
+	char filename[200];
 	int nsrcdata;
 	bool isOpen;
         bool reuseContext;

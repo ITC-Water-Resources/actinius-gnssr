@@ -7,6 +7,10 @@ struct webdav_config {
 	char rooturl[200];
 	char user[20];
 	char passw[20];
+#ifdef CONFIG_UPLOAD_CLIENT
+	char tlscert[2200];
+#endif
+
 };
 
 

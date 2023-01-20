@@ -16,14 +16,9 @@ refactored and modified from the fat_fs zephyr example by Tavish Naruka <tavishn
 #include "featherw_datalogger.h"
 #include <sys/types.h>
 
-/*#include <logging/log.h>*/
-/*LOG_MODULE_DECLARE(GNSSR,LOG_LEVEL_DBG);*/
+#include <logging/log.h>
+LOG_MODULE_DECLARE(GNSSR,CONFIG_GNSSR_LOG_LEVEL);
 
-
-/* temporary workaround using the logger*/
-#define LOG_ERR(...) printk(__VA_ARGS__)
-#define LOG_DBG(...) printk(__VA_ARGS__)
-#define LOG_INF(...) printk(__VA_ARGS__)
 
 static FATFS fat_fs;
 /* mounting info */
@@ -106,6 +101,8 @@ int get_sd_data_path(char * outpath, const char * filename){
 /* initialize directories if they do not exist*/
 int initialize_sdcard_files(void){
 	char dir[100];
+	
+	/*initialize data directory */
 	get_sd_data_path(dir,NULL);
 	if (!file_exists(dir)){
 		int stat=fs_mkdir(dir);	

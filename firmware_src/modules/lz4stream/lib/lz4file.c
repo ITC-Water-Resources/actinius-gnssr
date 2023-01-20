@@ -9,17 +9,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
-/*#include <logging/log.h>*/
+#include <logging/log.h>
 #include "lz4file.h"
 #include <fs/fs.h>
 #include <fs/fs_interface.h>
 #include <kernel.h>
 
-#define LOG_ERR(...) printk(__VA_ARGS__)
-#define LOG_DBG(...) printk(__VA_ARGS__)
 
-
-/*LOG_MODULE_DECLARE(GNSSR,LOG_LEVEL_DBG);*/
+LOG_MODULE_REGISTER(LZ4STREAM,LOG_LEVEL_DBG);
 
 
 
@@ -55,7 +52,10 @@ int handle_lz4error(size_t errcode){
 
 }
 
-
+static void tempname(char * dest,const char * src){
+	strcpy(dest,src);
+	strcat(dest,".tmp");
+}
 
 int lz4open(const char * path, lz4streamfile * lz4id){
 	
@@ -69,7 +69,14 @@ int lz4open(const char * path, lz4streamfile * lz4id){
 	}
 	lz4id->fid=k_malloc(sizeof(struct fs_file_t));
 	/*fs_file_t_init(lz4id->fid);*/
-	if ( fs_open(lz4id->fid,path,FS_O_WRITE|FS_O_CREATE)!=0){
+	
+	strcpy(lz4id->filename,path);
+	
+	/*append .tmp to path for a file which is not finalized */
+	char pathtmp[204];
+	tempname(pathtmp,lz4id->filename);
+
+	if ( fs_open(lz4id->fid,pathtmp,FS_O_WRITE|FS_O_CREATE)!=0){
 		k_free(lz4id);
 		lz4id=NULL;
 		LOG_ERR("Cannot open lz4 output file");
@@ -176,7 +183,17 @@ int lz4close(lz4streamfile * lz4id){
 	if (!lz4id->reuseContext){
 		LZ4F_freeCompressionContext(lz4id->ctx);
 	}
+	
+	
+	/*rename temporary file */
+	char pathtmp[204];
+	tempname(pathtmp,lz4id->filename);
+	
+	fs_rename(pathtmp,lz4id->filename);
+
 	lz4id->isOpen=false;
+	strcpy(lz4id->filename,"");
+
 	/*k_free(lz4id);*/
 	/*lz4id=NULL;*/
 

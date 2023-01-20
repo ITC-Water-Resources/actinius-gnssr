@@ -10,12 +10,10 @@
 #include <fs/fs.h>
 #include <string.h>
 
-/* temporary workaround using the logger*/
-#define LOG_ERR(...) printk(__VA_ARGS__)
-#define LOG_DBG(...) printk(__VA_ARGS__)
-#define LOG_INF(...) printk(__VA_ARGS__)
+#include <logging/log.h>
+LOG_MODULE_DECLARE(GNSSR,CONFIG_GNSSR_LOG_LEVEL);
 
-#define JSONBUFLEN 300
+#define JSONBUFLEN 2400
 
 /*static const struct json_obj_descr webdav_descr[] = {*/
 	/*JSON_OBJ_DESCR_PRIM(struct webdav_config, rooturl, JSON_TOK_STRING),*/
@@ -37,6 +35,10 @@ void set_defaults(struct config * conf){
 	strcpy(conf->webdav.rooturl,"https://changeme/files/remote.php/nonshib-webdav");
 	strcpy(conf->webdav.user,"changemeuser");
 	strcpy(conf->webdav.passw,"changepassw");
+#ifdef CONFIG_UPLOAD_CLIENT
+	strcpy(conf->webdav.tlscert,"-----BEGIN CERTIFICATE-----\nCOPY PEM CERTIFCATE HASH\n  HERE\n-----END CERTIFICATE-----\n");
+#endif
+
 }
 
 int read_config(struct config *conf){
@@ -49,10 +51,10 @@ int read_config(struct config *conf){
 	char jsonbuf[JSONBUFLEN];
 	
 	if (file_exists(configfile)){
-		LOG_INF("Reading config from %s\n",configfile);
+		LOG_INF("Reading config from %s\n",log_strdup(configfile));
 		/* read from file */
 		if ( fs_open(&fid,configfile,FS_O_READ)!=0){
-			LOG_ERR("cannot open configfile %s for reading",configfile);
+			LOG_ERR("cannot open configfile %s for reading",log_strdup(configfile));
 			return CONF_ERR;
 
 		}
@@ -90,8 +92,10 @@ int read_config(struct config *conf){
 		
 		cJSON * passw=cJSON_GetObjectItemCaseSensitive(webdav,"passw");
 		strcpy(conf->webdav.passw,passw->valuestring);
-
-
+#ifdef CONFIG_UPLOAD_CLIENT
+		cJSON * tlscert=cJSON_GetObjectItemCaseSensitive(webdav,"tlscert");
+		strcpy(conf->webdav.tlscert,tlscert->valuestring);
+#endif
 
 		cJSON_Delete(monitor);
 
@@ -120,8 +124,10 @@ int read_config(struct config *conf){
 		cJSON_AddStringToObject(webdav,"rooturl",conf->webdav.rooturl);
 		cJSON_AddStringToObject(webdav,"user",conf->webdav.user);
 		cJSON_AddStringToObject(webdav,"passw",conf->webdav.passw);
-		
 
+#ifdef CONFIG_UPLOAD_CLIENT
+		cJSON_AddStringToObject(webdav,"tlscert",conf->webdav.tlscert);
+#endif
 		/* print json to string */
 		int retcode= cJSON_PrintPreallocated(monitor,jsonbuf,JSONBUFLEN,1);
 

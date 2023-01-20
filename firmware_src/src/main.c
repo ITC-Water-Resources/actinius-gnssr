@@ -17,6 +17,10 @@
 #include "lz4file.h"
 #include "config.h"
 
+#ifdef CONFIG_UPLOAD_CLIENT
+#include "httpclnt.h"
+#endif 
+
 #ifdef CONFIG_SUPL_CLIENT_LIB
 #include <supl_os_client.h>
 #include <supl_session.h>
@@ -39,7 +43,8 @@
 
 #define STACKSIZE 1024
 #define PRIORITY 7
-
+#include <logging/log.h>
+LOG_MODULE_REGISTER(GNSSR,CONFIG_GNSSR_LOG_LEVEL);
 
 static const char update_indicator[] = {'\\', '|', '/', '-'};
 static const char *const at_commands[] = {
@@ -61,10 +66,10 @@ static struct config confdata;
 
 K_SEM_DEFINE(lte_ready, 0, 1);
 
-void bsd_recoverable_error_handler(uint32_t error)
-{
-	printf("Err: %lu\n", (unsigned long)error);
-}
+/*void bsd_recoverable_error_handler(uint32_t error)*/
+/*{*/
+	/*printf("Err: %lu\n", (unsigned long)error);*/
+/*}*/
 
 static int setup_modem(void)
 {
@@ -112,8 +117,8 @@ bool init_button(void)
 {
 	int ret = gpio_pin_configure(gpio_dev, BUTTON_GPIO_PIN, BUTTON_GPIO_FLAGS);
 	if (ret != 0) {
-        printk("Error %d: failed to configure %s pin %d\n",
-            	ret, BUTTON_GPIO_LABEL, BUTTON_GPIO_PIN);
+        LOG_ERR("Error %d: failed to configure %s pin %d\n",
+            	ret, log_strdup(BUTTON_GPIO_LABEL), BUTTON_GPIO_PIN);
         
 		return false;
     }
@@ -122,8 +127,8 @@ bool init_button(void)
                                        BUTTON_GPIO_PIN,
                                        GPIO_INT_EDGE_TO_ACTIVE);
     if (ret != 0) {
-        printk("Error %d: failed to configure interrupt on %s pin %d\n",
-               ret, BUTTON_GPIO_LABEL, BUTTON_GPIO_PIN);
+        LOG_ERR("Error %d: failed to configure interrupt on %s pin %d\n",
+               ret, log_strdup(BUTTON_GPIO_LABEL), BUTTON_GPIO_PIN);
 
         return false;
     }
@@ -159,7 +164,7 @@ int led_button_checker(void){
 	gpio_dev = device_get_binding(DT_LABEL(DT_NODELABEL(gpio0)));
 
 	if (!gpio_dev) {
-		printk("Error getting GPIO device binding\r\n");
+		LOG_ERR("Error getting GPIO device binding\r\n");
 
 		return -1;
 	}
@@ -209,7 +214,7 @@ int led_button_checker(void){
 K_THREAD_DEFINE(led_button_checker_id, STACKSIZE, led_button_checker, NULL, NULL, NULL,
 		PRIORITY, 0, 0);
 
-#ifdef CONFIG_SUPL_CLIENT_LIB
+#ifdef CONFIG_UPLOAD_CLIENT
 /* Accepted network statuses read from modem */
 static const char status1[] = "+CEREG: 1";
 static const char status2[] = "+CEREG:1";
@@ -252,6 +257,10 @@ static int activate_lte(bool activate)
 
 	return 0;
 }
+
+
+
+
 #endif
 
 static int gnss_ctrl(uint32_t ctrl)
@@ -266,7 +275,7 @@ static int gnss_ctrl(uint32_t ctrl)
 	/* allow low elevation tracking */
 	nrf_gnss_elevation_mask_t gnss_lowelev = 2;
 
-	nrf_setsockopt(gnss_fd, NRF_SOL_GNSS, NRF_SO_GNSS_FIX_INTERVAL, &fix_interval, sizeof(fix_interval));					       NRF_GNSS_NMEA_RMC_MASK;
+	nrf_setsockopt(gnss_fd, NRF_SOL_GNSS, NRF_SO_GNSS_FIX_INTERVAL, &fix_interval, sizeof(fix_interval));	
 
 	
 	if (ctrl == GNSS_INIT_AND_START) {
@@ -275,9 +284,9 @@ static int gnss_ctrl(uint32_t ctrl)
 				     NRF_PROTO_GNSS);
 
 		if (gnss_fd >= 0) {
-			printk("GPS Socket created\n");
+			LOG_INF("GPS Socket created\n");
 		} else {
-			printk("Could not init socket (err: %d)\n", gnss_fd);
+			LOG_ERR("Could not init socket (err: %d)\n", gnss_fd);
 			return -1;
 		}
 
@@ -287,7 +296,7 @@ static int gnss_ctrl(uint32_t ctrl)
 					&fix_retry,
 					sizeof(fix_retry));
 		if (retval != 0) {
-			printk("Failed to set fix retry value\n");
+			LOG_ERR("Failed to set fix retry value\n");
 			return -1;
 		}
 
@@ -297,7 +306,7 @@ static int gnss_ctrl(uint32_t ctrl)
 					&fix_interval,
 					sizeof(fix_interval));
 		if (retval != 0) {
-			printk("Failed to set fix interval value\n");
+			LOG_ERR("Failed to set fix interval value\n");
 			return -1;
 		}
 
@@ -307,7 +316,7 @@ static int gnss_ctrl(uint32_t ctrl)
 					&nmea_mask,
 					sizeof(nmea_mask));
 		if (retval != 0) {
-			printk("Failed to set nmea mask\n");
+			LOG_ERR("Failed to set nmea mask\n");
 			return -1;
 		}
 		
@@ -317,7 +326,7 @@ static int gnss_ctrl(uint32_t ctrl)
 					&gnss_lowelev,
 					sizeof(gnss_lowelev));
 		if (retval != 0) {
-			printk("Failed to set low elevation mask\n");
+			LOG_ERR("Failed to set low elevation mask\n");
 			return -1;
 		}
 	}
@@ -330,7 +339,7 @@ static int gnss_ctrl(uint32_t ctrl)
 					&delete_mask,
 					sizeof(delete_mask));
 		if (retval != 0) {
-			printk("Failed to start GPS\n");
+			LOG_ERR("Failed to start GPS\n");
 			return -1;
 		}
 	}
@@ -342,7 +351,7 @@ static int gnss_ctrl(uint32_t ctrl)
 					&delete_mask,
 					sizeof(delete_mask));
 		if (retval != 0) {
-			printk("Failed to stop GPS\n");
+			LOG_ERR("Failed to stop GPS\n");
 			return -1;
 		}
 	}
@@ -350,12 +359,30 @@ static int gnss_ctrl(uint32_t ctrl)
 	return 0;
 }
 
+void sync_files(){
+	if (confdata.upload == 1){	
+		LOG_INF("Syncing data files");
+		activate_lte(true);
+		LOG_INF("Established LTE link\n");
+		
+		/*sync operation ..*/
+		LOG_INF("Closing LTE link and restarting GNSS\n");
+		activate_lte(false);
+		k_sleep(K_MSEC(1000));
+		gnss_ctrl(GNSS_RESTART);
+		k_sleep(K_MSEC(1000));
+	}else{
+		LOG_INF("Skipping sync due to disabled user options upload");
+	}
+
+}
+
 static int init_app(void)
 {
 	int retval;
 
 	if (setup_modem() != 0) {
-		printk("Failed to initialize modem\n");
+		LOG_ERR("Failed to initialize modem\n");
 		return -1;
 	}
 
@@ -442,7 +469,13 @@ int rollover_lz4log(lz4streamfile * lz4fid){
 
 	int nthfile;
 	char filenamebase[50];
-	char lz4fout[100];
+
+
+	/* File potentially needs closing */
+	if (lz4fid->isOpen){
+		lz4close(lz4fid);
+	}
+
 	for (nthfile=0;nthfile < 100;++nthfile){
 		sprintf(filenamebase,"%s_%04u-%02u-%02u_%02d.lz4",
 					confdata.filebase,
@@ -450,27 +483,20 @@ int rollover_lz4log(lz4streamfile * lz4fid){
 					last_pvt.pvt.datetime.month,
 					last_pvt.pvt.datetime.day,nthfile);
 			
-		get_sd_data_path(lz4fout, filenamebase);
+		get_sd_data_path(lz4fid->filename, filenamebase);
 		/* continue finding a new file if it already exists */
-		if (!file_exists(lz4fout)){
+		if (!file_exists(lz4fid->filename)){
 			break;
 		}
 	}
 	if (nthfile >= 100){
-		printk("Cannot find an available file name, quitting");
-
-		/* File potentially needs closing */
-		lz4close(lz4fid);
+		LOG_ERR("Cannot find an available file name, quitting");
 		return -1;
 	}
-	/* if we land here we found an available file name*/
-		
-	/* potentially close file */
-	lz4close(lz4fid);
 	
-	printk("Opening %s %p\n",lz4fout,lz4fid);		
+	LOG_INF("Opening %s %p\n",log_strdup(lz4fid->filename),lz4fid);		
 	
-	if (lz4open(lz4fout,lz4fid) != LZ4_SUCCESS){
+	if (lz4open(lz4fid->filename,lz4fid) != LZ4_SUCCESS){
 	
 		return -1;
 	}
@@ -526,6 +552,11 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 					rollover_lz4log(lz4fid);
 					//possibly reset button after log rollover
 					button_pressed=false;
+
+#ifdef CONFIG_UPLOAD_CLIENT
+					sync_files();
+#endif
+
 				}
 
 			}else{
@@ -550,11 +581,11 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 			       gnss_data->agps.data_flags);
 			gnss_ctrl(GNSS_STOP);
 			activate_lte(true);
-			printk("Established LTE link\n");
+			LOG_INF("Established LTE link\n");
 			if (open_supl_socket() == 0) {
-				printf("Starting SUPL session\n");
+				LOG_INF("Starting SUPL session\n");
 				supl_session(&gnss_data->agps);
-				printk("Done\n");
+				LOG_INF("Done\n");
 				close_supl_socket();
 			}
 			activate_lte(false);
@@ -586,13 +617,13 @@ int inject_agps_type(void *agps,
 				sizeof(type));
 
 	if (retval != 0) {
-		printk("Failed to send AGNSS data, type: %d (err: %d)\n",
+		LOG_ERR("Failed to send AGNSS data, type: %d (err: %d)\n",
 		       type,
 		       errno);
 		return -1;
 	}
 
-	printk("Injected AGPS data, flags: %d, size: %d\n", type, agps_size);
+	LOG_INF("Injected AGPS data, flags: %d, size: %d\n", type, agps_size);
 
 	return 0;
 }
@@ -616,7 +647,7 @@ int main(void)
 	};
 #endif
 
-	printk("Mounting and initializing featherwing sdcard\n");
+	LOG_INF("Mounting and initializing featherwing sdcard\n");
 
 	if (mount_sdcard() != FEA_SUCCESS){
 		led_status=LED_ERROR;
@@ -628,15 +659,23 @@ int main(void)
 		return -1;
 	}
 
-	printk("conf data before %p %s\n",&confdata,confdata.filebase);
+	LOG_INF("conf data before %p %s\n",&confdata,log_strdup(confdata.filebase));
 	/* read configuration */
 	if (read_config(&confdata) != CONF_SUCCESS){
 		led_status=LED_ERROR;
 		return -1;
 	}
 
-	printk("Starting GNSS-R logger application\n");
-	printk("confdata after %s \n",confdata.webdav.rooturl);
+#ifdef CONFIG_UPLOAD_CLIENT
+	/* register TLS certificate in the modem */
+	if (cert_provision(confdata.webdav.tlscert) != HTTPCLNT_SUCCESS){
+		led_status=LED_ERROR;
+		return -1;
+	}
+
+#endif
+	LOG_INF("Starting GNSS-R logger application\n");
+	LOG_INF("confdata after %s \n",log_strdup(confdata.webdav.rooturl));
 
 	if (init_app() != 0) {
 		led_status=LED_ERROR;
@@ -653,7 +692,7 @@ int main(void)
 	static struct lz4streamfile lz4fid ;
 	init_lz4stream(&lz4fid,true);
 		
-	printk("Getting GNSS data...\n");
+	LOG_INF("Getting GNSS data...\n");
 	last_pvt.pvt.datetime.day=0; ///Ensure that log will be rotated on first passs throug
 	while (1) {
 
