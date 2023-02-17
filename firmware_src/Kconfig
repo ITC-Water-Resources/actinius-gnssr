@@ -3,6 +3,9 @@
 #
 #
 
+module = GNSSR
+module-str = GNSS reflectometer
+
 menu "GNSS-reflectometer"
 
 config GNSS_MIN_ELEV
@@ -14,32 +17,20 @@ config GNSS_MIN_ELEV
 
 config UPLOAD_CLIENT
 	bool "Enable file uploads"
-	select MODEM_KEY_MGMT
-        depends on HTTP_CLIENT
-        depends on AT_CMD_PARSER
-        depends on NRF_MODEM_LIB
+        default y
         help
 	  Allows uploading of data files to webdav folder
+	select MODEM_KEY_MGMT 
+        select AT_CMD_PARSER
+        select NRF_MODEM_LIB
+        #depends on HTTP_CLIENT && AT_CMD_PARSER && NRF_MODEM_LIB
 
-#config GNSS_SAMPLE_LOW_ACCURACY
-	#bool "Allow low accuracy fixes"
-	#help
-	  #Allows fixes with lower accuracy.
+source "${NRF_BASE}/lib/supl/Kconfig" 
 
+source "subsys/logging/Kconfig.template.log_config"
 endmenu
 
 menu "Zephyr Kernel"
 source "Kconfig.zephyr"
 endmenu
 
-#antenna settings
-#source "${NRF_BASE}/lib/modem_antenna/Kconfig"
-
-
-
-module = GNSSR
-module-str = GNSS reflectometer
-source "subsys/logging/Kconfig.template.log_config"
-
-#source "${ZEPHYR_BASE}/subsys/logging/Kconfig.template.log_config"
-#source "${ZEPHYR_BASE}/subsys/net/Kconfig"

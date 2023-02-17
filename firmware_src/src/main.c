@@ -223,6 +223,7 @@ static const char status4[] = "+CEREG:5";
 
 static void wait_for_lte(void *context, const char *response)
 {
+	LOG_DBG("Checking LTE Modem status\n",response);	
 	if (!memcmp(status1, response, AT_CMD_SIZE(status1)) ||
 		!memcmp(status2, response, AT_CMD_SIZE(status2)) ||
 		!memcmp(status3, response, AT_CMD_SIZE(status3)) ||
@@ -242,9 +243,13 @@ static int activate_lte(bool activate)
 		if (at_cmd_write("AT+CEREG=2", NULL, 0, NULL) != 0) {
 			return -1;
 		}
+		
 
-		k_sem_take(&lte_ready, K_FOREVER);
+		if (k_sem_take(&lte_ready, K_MSEC(30000)) != 0){
+			return -1;
+		}
 
+		
 		at_notif_deregister_handler(NULL, wait_for_lte);
 		if (at_cmd_write("AT+CEREG=0", NULL, 0, NULL) != 0) {
 			return -1;
@@ -362,6 +367,7 @@ static int gnss_ctrl(uint32_t ctrl)
 void sync_files(){
 	if (confdata.upload == 1){	
 		LOG_INF("Syncing data files");
+		gnss_ctrl(GNSS_STOP);
 		activate_lte(true);
 		LOG_INF("Established LTE link\n");
 		
@@ -518,6 +524,23 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 			  sizeof(nrf_gnss_data_frame_t),
 			  NRF_MSG_DONTWAIT);
 
+	if (retval <= 0){
+		/* add a period of mindfullness to wait for more data */
+		k_sleep(K_MSEC(600));
+	}
+
+	/*if (retval == -1){*/
+		/*led_status=LED_ERROR;*/
+		/*LOG_ERR("ERROR reading gnss_data frame trying to restart GNSS\n");*/
+		
+		/*gnss_ctrl(GNSS_STOP);*/
+		/*k_sleep(K_MSEC(2000));*/
+		
+		/*gnss_ctrl(GNSS_RESTART);*/
+		/*k_sleep(K_MSEC(2000));*/
+		/*return retval;*/
+	/*}*/
+
 	if (retval > 0) {
 
 		switch (gnss_data->data_id) {
@@ -568,6 +591,11 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 			if (got_fix && lz4fid->isOpen){
 				/* put nmea data in the lz4log if it's open*/
 				
+				lz4write(lz4fid,gnss_data->nmea);
+			}else if (got_fix && !lz4fid->isOpen){
+				/*reopen file (we actually don;t expect to land here nbut just in case*/
+				
+				rollover_lz4log(lz4fid);
 				lz4write(lz4fid,gnss_data->nmea);
 			}
 
@@ -710,7 +738,6 @@ int main(void)
 		}
 
 
-		k_sleep(K_MSEC(500));
 
 	}
 
