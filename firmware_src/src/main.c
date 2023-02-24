@@ -214,7 +214,7 @@ int led_button_checker(void){
 K_THREAD_DEFINE(led_button_checker_id, STACKSIZE, led_button_checker, NULL, NULL, NULL,
 		PRIORITY, 0, 0);
 
-#ifdef CONFIG_UPLOAD_CLIENT
+#if defined(CONFIG_UPLOAD_CLIENT) || defined(CONFIG_SUPL_CLIENT_LIB)
 /* Accepted network statuses read from modem */
 static const char status1[] = "+CEREG: 1";
 static const char status2[] = "+CEREG:1";
