@@ -187,11 +187,11 @@ int led_button_checker(void){
 			k_sleep(K_MSEC(4000));
 			break;
 		case LED_LOGGING:
-			/*flash green for a 10th of a second second every 2 seconds*/	
+			/*flash green for a 10th of a second second every 10 seconds*/	
 			gpio_pin_set(gpio_dev, GREEN_LED_PIN, LED_ON);
 			k_sleep(K_MSEC(100));
 			turn_leds_off();
-			k_sleep(K_MSEC(1900));
+			k_sleep(K_MSEC(9900));
 			break;
 		case LED_ERROR:
 			/*blinking red a second every 10 seconds*/	
@@ -199,6 +199,13 @@ int led_button_checker(void){
 			k_sleep(K_MSEC(1000));
 			turn_leds_off();
 			k_sleep(K_MSEC(9000));
+			break;
+		case LED_UPLOADING:
+			/*blinking red a second every 5 seconds*/	
+			gpio_pin_set(gpio_dev, BLUE_LED_PIN, LED_ON);
+			k_sleep(K_MSEC(1000));
+			turn_leds_off();
+			k_sleep(K_MSEC(4000));
 			break;
 		default:
 			/* shouldn't occur really, but allow sleep so this function does not spin */
