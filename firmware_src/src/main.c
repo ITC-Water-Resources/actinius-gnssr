@@ -12,13 +12,14 @@
 #include <stdio.h>
 #include <modem/at_cmd.h>
 #include <modem/at_notif.h>
+#include <modem/modem_info.h>
 #include "featherw_datalogger.h"
 #include <drivers/gpio.h>
 #include "lz4file.h"
 #include "config.h"
 
 #ifdef CONFIG_UPLOAD_CLIENT
-#include "httpclnt.h"
+#include "uploadclient.h"
 #endif 
 
 #ifdef CONFIG_SUPL_CLIENT_LIB
@@ -27,7 +28,7 @@
 #include "supl_support.h"
 #endif
 
-#define AT_XSYSTEMMODE      "AT\%XSYSTEMMODE=1,0,1,0"
+#define AT_XSYSTEMMODE      "AT\%XSYSTEMMODE=1,0,1,1"
 #define AT_ACTIVATE_GPS     "AT+CFUN=31"
 #define AT_ACTIVATE_LTE     "AT+CFUN=21"
 #define AT_DEACTIVATE_LTE   "AT+CFUN=20"
@@ -107,6 +108,7 @@ static struct gpio_callback gpio_cb;
 
 static int led_status= LED_SEARCHING;
 static bool button_pressed=false;
+static struct device_status dev_status;
 
 void button_pressed_callback(const struct device *gpiob, struct gpio_callback *cb, gpio_port_pins_t pins)
 {
@@ -201,7 +203,7 @@ int led_button_checker(void){
 			k_sleep(K_MSEC(9000));
 			break;
 		case LED_UPLOADING:
-			/*blinking red a second every 5 seconds*/	
+			/*blinking blue a second every 5 seconds*/	
 			gpio_pin_set(gpio_dev, BLUE_LED_PIN, LED_ON);
 			k_sleep(K_MSEC(1000));
 			turn_leds_off();
@@ -230,7 +232,6 @@ static const char status4[] = "+CEREG:5";
 
 static void wait_for_lte(void *context, const char *response)
 {
-	LOG_DBG("Checking LTE Modem status\n",response);	
 	if (!memcmp(status1, response, AT_CMD_SIZE(status1)) ||
 		!memcmp(status2, response, AT_CMD_SIZE(status2)) ||
 		!memcmp(status3, response, AT_CMD_SIZE(status3)) ||
@@ -371,19 +372,78 @@ static int gnss_ctrl(uint32_t ctrl)
 	return 0;
 }
 
+
 void sync_files(){
-	if (confdata.upload == 1){	
+	if (confdata.upload == 1){
+		int led_status_old=led_status;
+		led_status=LED_UPLOADING;	
 		LOG_INF("Syncing data files");
-		gnss_ctrl(GNSS_STOP);
-		activate_lte(true);
-		LOG_INF("Established LTE link\n");
+		char lz4file[50];
+		char lz4fullfile[100];
+		char lz4renamed[103];
+		char datadir[50];
+		struct fs_dir_t dirp;
+		(void)get_sd_data_path(datadir,NULL);
+		(void) lsdir_init(datadir, &dirp);	
+
+		bool lte_active=false;
 		
+		while(lsdir_next(".lz4",&dirp,lz4file) == 0){
+			if(!lte_active){
+				gnss_ctrl(GNSS_STOP);
+				activate_lte(true);
+				LOG_INF("Established LTE link\n");
+				lte_active=true;
+			}
+			(void)get_sd_data_path(lz4fullfile,lz4file);
+			printk("Uploading lz4file found %s\n",lz4fullfile);
+			if(webdavUploadFile(lz4fullfile,&confdata) == UPLOADCLNT_SUCCESS){
+				/*rename file */
+				LOG_INF("Sucessfully uploaded file %s, renaming",log_strdup(lz4file));
+				strcpy(lz4renamed,lz4fullfile);
+				strcat(lz4renamed,"_ok");
+				fs_rename(lz4fullfile,lz4renamed);
+			}else{
+				LOG_INF("cannot currently upload file %s, trying later",log_strdup(lz4file));
+			}
+		}
+
+
+
+		(void) lsdir_close(&dirp);	
+
+
+		if (lte_active){
+			LOG_INF("Closing LTE link and restarting GNSS\n");
+			activate_lte(false);
+			k_sleep(K_MSEC(1000));
+			gnss_ctrl(GNSS_RESTART);
+			k_sleep(K_MSEC(1000));
+			lte_active=false;
+		}
+
+		
+		/*char uploadfilename[100];*/
+
+		/*[>temporary dummy file to upload<]*/
+		/*if(get_sd_config_path(uploadfilename,"status.json")!= FEA_SUCCESS){*/
+			/*LOG_ERR("Cannot set uploadfile");*/
+		/*}*/
+		/*[> write status as JSON to file<]*/
+		/*if(write_status(uploadfilename,&dev_status) != CONF_SUCCESS){*/
+			/*LOG_ERR("Cannot write uploadfile");*/
+		/*}*/
+		/*[>end temporary dummy file<]*/
+
+		/*if(uploadFile(uploadfilename,&confdata) != UPLOADCLNT_SUCCESS){*/
+			/*LOG_ERR("Failed to upload file,continuing");*/
+
+		/*}	*/
+
+
 		/*sync operation ..*/
-		LOG_INF("Closing LTE link and restarting GNSS\n");
-		activate_lte(false);
-		k_sleep(K_MSEC(1000));
-		gnss_ctrl(GNSS_RESTART);
-		k_sleep(K_MSEC(1000));
+		led_status=led_status_old;
+
 	}else{
 		LOG_INF("Skipping sync due to disabled user options upload");
 	}
@@ -480,7 +540,6 @@ static void print_housekeeping_data(nrf_gnss_data_frame_t *pvt_data)
 /* open a new unused logging stream */
 int rollover_lz4log(lz4streamfile * lz4fid){
 
-	int nthfile;
 	char filenamebase[50];
 
 
@@ -489,23 +548,15 @@ int rollover_lz4log(lz4streamfile * lz4fid){
 		lz4close(lz4fid);
 	}
 
-	for (nthfile=0;nthfile < 100;++nthfile){
-		sprintf(filenamebase,"%s_%04u-%02u-%02u_%02d.lz4",
-					confdata.filebase,
-					last_pvt.pvt.datetime.year,
-					last_pvt.pvt.datetime.month,
-					last_pvt.pvt.datetime.day,nthfile);
+	sprintf(filenamebase,"%s_%04u-%02u-%02u_%02d%02d.lz4",
+			confdata.filebase,
+			last_pvt.pvt.datetime.year,
+			last_pvt.pvt.datetime.month,
+			last_pvt.pvt.datetime.day,
+			last_pvt.pvt.datetime.hour,
+			last_pvt.pvt.datetime.minute);
 			
-		get_sd_data_path(lz4fid->filename, filenamebase);
-		/* continue finding a new file if it already exists */
-		if (!file_exists(lz4fid->filename)){
-			break;
-		}
-	}
-	if (nthfile >= 100){
-		LOG_ERR("Cannot find an available file name, quitting");
-		return -1;
-	}
+	get_sd_data_path(lz4fid->filename, filenamebase);
 	
 	LOG_INF("Opening %s %p\n",log_strdup(lz4fid->filename),lz4fid);		
 	
@@ -664,6 +715,36 @@ int inject_agps_type(void *agps,
 }
 #endif
 
+void print_deviceinfo(void){
+	char modeminfostring [20];
+	/* print some modem info */
+	if(modem_info_init() != 0){
+		LOG_ERR("error initializing modem info");
+		return;
+	}
+	
+	if(modem_info_string_get(MODEM_INFO_FW_VERSION, modeminfostring,sizeof(modeminfostring))< 0){
+		LOG_ERR("cannot retrieve modem version number");
+			
+	}
+	
+	LOG_INF("modem version %s\n",log_strdup(modeminfostring));
+
+	if(modem_info_string_get(MODEM_INFO_ICCID, modeminfostring,sizeof(modeminfostring))< 0){
+		LOG_ERR("cannot retrieve ESIM ICCID");
+			
+	}
+	LOG_INF("ESIM ICCID %s\n",log_strdup(modeminfostring));
+	
+	if(modem_info_string_get(MODEM_INFO_IMEI, modeminfostring,sizeof(modeminfostring))< 0){
+		LOG_ERR("cannot retrieve module IMEI");
+			
+	}
+	LOG_INF("DEVICE IMEI %s\n",log_strdup(modeminfostring));
+
+
+}
+
 
 
 
@@ -701,16 +782,26 @@ int main(void)
 		return -1;
 	}
 
+	print_deviceinfo();
+
+	/*initialize status*/
+	strcpy(dev_status.device_id,confdata.filebase);
+	dev_status.uptime=k_uptime_get()/(MSEC_PER_SEC*3600.0);
+	dev_status.longitude=0.0;
+	dev_status.height=0.0;
+	dev_status.latitude=0.0;
+
 #ifdef CONFIG_UPLOAD_CLIENT
 	/* register TLS certificate in the modem */
-	if (cert_provision(confdata.webdav.tlscert) != HTTPCLNT_SUCCESS){
-		led_status=LED_ERROR;
-		return -1;
+	if (confdata.webdav.usetls == 1){
+		if (cert_provision(confdata.webdav.tlscert) != UPLOADCLNT_SUCCESS){
+			led_status=LED_ERROR;
+			return -1;
+		}
 	}
 
 #endif
 	LOG_INF("Starting GNSS-R logger application\n");
-	LOG_INF("confdata after %s \n",log_strdup(confdata.webdav.rooturl));
 
 	if (init_app() != 0) {
 		led_status=LED_ERROR;
@@ -724,6 +815,7 @@ int main(void)
 		return rc;
 	}
 #endif
+
 	static struct lz4streamfile lz4fid ;
 	init_lz4stream(&lz4fid,true);
 		

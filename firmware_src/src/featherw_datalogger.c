@@ -29,6 +29,7 @@ static struct fs_mount_t mp = {
 static const char *disk_mount_pt = "/SD:";
 static const char *sddata= "/SD:/data";
 static const char *sdconfig= "/SD:/config";
+static const char *sdarchive= "/SD:/archive";
 
 /*
 *  Note the fatfs library is able to mount only strings inside _VOLUME_STRS
@@ -60,7 +61,7 @@ int mount_sdcard(void)
 		LOG_ERR("Unable to get sector size");
 		return FEA_ERR_SECSIZE;
 	}
-	LOG_DBG("Sector size %u\n", block_size);
+	LOG_INF("Sector size %u\n", block_size);
 
 	memory_size_mb = (uint64_t)block_count * block_size;
 	LOG_DBG("Memory Size(MB) %u\n", (uint32_t)(memory_size_mb >> 20));
@@ -98,6 +99,10 @@ int get_sd_data_path(char * outpath, const char * filename){
 	
 }
 
+int get_sd_archive_path(char * outpath, const char * filename){
+	return get_sd_path(outpath,sdarchive, filename);
+	
+}
 /* initialize directories if they do not exist*/
 int initialize_sdcard_files(void){
 	char dir[100];
@@ -111,6 +116,14 @@ int initialize_sdcard_files(void){
 		}
 	}
 		
+	get_sd_archive_path(dir,NULL);
+	if (!file_exists(dir)){
+		int stat=fs_mkdir(dir);	
+		if (stat  != 0){
+			return FEA_ERR_INIT;
+		}
+	}
+	
 	/* also intialize config directory */
 	get_sd_config_path(dir,NULL);
 	if (!file_exists(dir)){
@@ -126,6 +139,16 @@ int initialize_sdcard_files(void){
 
 
 
+size_t file_size(const char * path){
+
+	struct fs_dirent entry;
+	if (fs_stat(path,&entry)== 0){
+		return entry.size;;	
+	}else{
+		return 0;
+	}
+
+}
 
 bool file_exists(const char * path){
 
@@ -171,6 +194,62 @@ ssize_t fs_gets(char * linebuffer,size_t bufsz,struct fs_file_t* fid){
 		return -1;
 	}
 	
+}
+
+
+int lsdir_init(const char * dirpath, struct fs_dir_t * dirp){
+
+	int res;
+	/*fs_dir_t_init(dirp);*/
+
+	/* Verify fs_opendir() */
+	res = fs_opendir(dirp, dirpath);
+	if (res) {
+		printk("Error opening dir %s [%d]\n", dirpath, res);
+		return res;
+	}
+}
+
+int lsdir_close(struct fs_dir_t * dirp){
+	return fs_closedir(dirp);
+}
+
+int lsdir_next(const char * endswith, struct fs_dir_t * dirp, char * path){
+
+	static struct fs_dirent entry;
+	int res;
+	for (;;) {
+		/* Verify fs_readdir() */
+		res = fs_readdir(dirp, &entry);
+
+		/*entry.name[0] == 0 means end-of-dir */
+		if (res || entry.name[0] == 0) {
+			break;
+		}
+
+		if (entry.type == FS_DIR_ENTRY_DIR) {
+			LOG_DBG("[DIR ] %s\n", log_strdup(entry.name));
+		} else {
+
+			/* apply filter criteria to a file*/
+			if (endswith != NULL){
+				/* check filename with filter*/
+				int ncmp=strlen(endswith);
+				if(strcmp(entry.name+strlen(entry.name)-ncmp,endswith) != 0){
+					/*no match keep going */
+					continue;
+				}
+			} 
+			
+			/* construct output path filename*/
+			strcpy(path,entry.name);
+			return 0;/*success*/
+		}
+	}
+
+	/* end of directory */
+	return -1;
+
 }
 
 

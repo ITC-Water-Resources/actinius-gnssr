@@ -41,4 +41,9 @@ ssize_t fs_gets(char * linebuffer,size_t bufsz,struct fs_file_t* fid);
 
 bool file_exists(const char *path);
 
+size_t file_size(const char *path);
+
+int lsdir_init(const char* dirpath, struct fs_dir_t *dirp);
+int lsdir_close(struct fs_dir_t * dirp);
+int lsdir_next(const char * endswith, struct fs_dir_t *dirp, char* path);
 #endif /* FEATHERW_H */

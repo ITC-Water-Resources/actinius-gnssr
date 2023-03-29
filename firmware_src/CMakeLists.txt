@@ -22,7 +22,7 @@ zephyr_library_sources(src/main.c src/featherw_datalogger.c src/config.c)
 
 zephyr_library_sources_ifdef(
   CONFIG_UPLOAD_CLIENT
-  src/httpclnt.c
+  src/uploadclient.c
 )
 zephyr_library_sources_ifdef(
   CONFIG_SUPL_CLIENT_LIB
