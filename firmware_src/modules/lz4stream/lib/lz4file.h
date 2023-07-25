@@ -22,7 +22,7 @@
  * Struct holding the administrative parts of an open lz4stream
  */
 
-#include <zephyr.h>
+#include <zephyr/kernel.h>
 #include "lz4frame_static.h"
 
 

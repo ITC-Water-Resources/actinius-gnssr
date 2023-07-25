@@ -8,7 +8,6 @@
 #include <string.h>
 #include <nrf_socket.h>
 #include <net/socket.h>
-/*#include <net/socket.h>*/
 #include <net/tls_credentials.h>
 #include <net/http_client.h>
 #include <logging/log.h>

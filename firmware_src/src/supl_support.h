@@ -1,87 +1,48 @@
 /*
  * Copyright (c) 2019 Nordic Semiconductor ASA
  *
- * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
-#ifndef SUPL_SUPPORT_H_
-#define SUPL_SUPPORT_H_
+#ifndef ASSISTANCE_H_
+#define ASSISTANCE_H_
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/** This function will open an socket to the SUPL server
+/**
+ * @brief Initializes the assistance module.
  *
- * @brief This function will create and open a socket to the SUPL servers
- *         that can be used by the SUPL clients read and write functions.
- *         The socket handle is available in the implementation .c file scope
- *         and a reference is therefor not passed to the function.
+ * @param[in] assistance_work_q Work queue that can be used by the assistance module.
  *
- * @retval 0  If opening socket was successful.
- * @retval -1 If opening socket failed
+ * @retval 0 on success.
+ * @retval -1 in case of an error.
  */
-int open_supl_socket(void);
+int assistance_init();
 
-/** This function will close the socket previously opened
+/**
+ * @brief Handles an assistance data request.
  *
- * @brief This function will close the socket previously by the
- *        open_supl_socket function.
+ * @details Fetches and injects assistance data to the GNSS.
  *
+ * @param[in] agps_request A-GPS data requested by GNSS.
+ *
+ * @retval 0 on success.
+ * @retval <0 in case of an error.
  */
-void close_supl_socket(void);
+int assistance_request(struct nrf_modem_gnss_agps_data_frame *agps_request);
 
-/** Function used by the SUPL client library for logging
+/**
+ * @brief Returns assistance module state.
  *
- * @brief This function is the implementation for logger function
- *        used by the SUPL client library. In this example will this
- *        lines be passed unchanged to the logger in Zephyr. If logging
- *        fails a value less than 0 should be returned to let the
- *        client know.
- *
- * @retval 0  If the logging information is processed correctly
- * @retval -1 If the function failed
+ * @retval true if assistance module is downloading data.
+ * @retval false if assistance module is idle.
  */
-int supl_logger(int level, const char *fmt, ...);
-
-/** Read function for SUPL socket used by the SUPL client
- *
- * @brief As the application owns the SUPL server socket the application
- *        can let the SUPL library client read data from the SUPL server
- *        calling this function.
- *
- *
- * @param[in] p_buff    Is the buffer that the SUPL client want to put
- *                      data that are received from the server into.
- * @param[in] nbytes    Is how many bytes that the supplied buffer can take
- * @param[in] user_data Is data previously specified by the application
- *                      in the context structure.
- *
- * @retval >0 Is the number of bytes received
- * @retval <0 If some error occurred
- */
-ssize_t supl_read(void *p_buff, size_t nbytes, void *user_data);
-
-/** Write function for SUPL socket used by the SUPL client
- *
- * @brief As the application owns the SUPL server socket the application
- *        can let the SUPL library client write data to the SUPL server
- *        calling this function.
- *
- * @param[out] p_buff    Is the buffer containing the data to be written to
- *                       SUPL server
- *             nbytes    Is the number of bytes in the buffer to be written
- *                       to the SUPL server.
- *             user_data Is data previously specified by the application
- *                       in the context structure.
- *
- * @retval >0 Is the number of bytes written
- * @retval <0 If some error occurred
- */
-ssize_t supl_write(const void *p_buff, size_t nbytes, void *user_data);
+bool assistance_is_active(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* SUPL_SUPPORT_H */
+#endif /* ASSISTANCE_H_ */

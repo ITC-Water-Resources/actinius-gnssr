@@ -9,11 +9,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 #include "lz4file.h"
-#include <fs/fs.h>
-#include <fs/fs_interface.h>
-#include <kernel.h>
+#include <zephyr/fs/fs.h>
+#include <zephyr/fs/fs_interface.h>
+/*#include <zephyr/kernel.h>*/
 
 
 LOG_MODULE_REGISTER(LZ4STREAM,LOG_LEVEL_DBG);
@@ -68,7 +68,7 @@ int lz4open(const char * path, lz4streamfile * lz4id){
 		return LZ4_ERR_IO;
 	}
 	lz4id->fid=k_malloc(sizeof(struct fs_file_t));
-	/*fs_file_t_init(lz4id->fid);*/
+	fs_file_t_init(lz4id->fid);
 	
 	strcpy(lz4id->filename,path);
 	

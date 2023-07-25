@@ -28,3 +28,4 @@ baud=115200
 
 stty -F $device ${baud} cs8 -ixon
 cat $device
+#tail -f $device

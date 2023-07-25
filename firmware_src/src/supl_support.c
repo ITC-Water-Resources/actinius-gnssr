@@ -1,148 +1,66 @@
 /*
  * Copyright (c) 2019 Nordic Semiconductor ASA
  *
- * SPDX-License-Identifier: LicenseRef-BSD-5-Clause-Nordic
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
 
-#include <zephyr.h>
-#include <supl_session.h>
 #include <stdio.h>
-#include <logging/log.h>
-#include <net/socket.h>
+#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/net/socket.h>
+#include <supl_os_client.h>
+/*#include <supl_session.h>*/
 
-#define SUPL_SERVER        "supl.google.com"
-#define SUPL_SERVER_PORT   7276
+#include "supl_support.h"
 
-/* Number of getaddrinfo attempts */
-#define GAI_ATTEMPT_COUNT  3
+LOG_MODULE_DECLARE(GNSSR,CONFIG_GNSSR_LOG_LEVEL);
+#define SUPL_SERVER      "supl.google.com"
+#define SUPL_SERVER_PORT 7276
 
-static int supl_fd;
+static int supl_fd = -1;
+static volatile bool assistance_active;
 
-int open_supl_socket(void)
+static ssize_t supl_read(void *p_buff, size_t nbytes, void *user_data)
 {
-	int err = -1;
-	int proto;
-	int gai_cnt = 0;
-	uint16_t port;
-	struct addrinfo *addr;
-	struct addrinfo *info;
+	ARG_UNUSED(user_data);
 
-	proto = IPPROTO_TCP;
-	port = htons(SUPL_SERVER_PORT);
+	ssize_t rc = recv(supl_fd, p_buff, nbytes, 0);
 
-	struct addrinfo hints = {
-		.ai_family = AF_INET,
-		.ai_socktype = SOCK_STREAM,
-		.ai_protocol = proto,
-		/* Either a valid,
-		 * NULL-terminated access point name or NULL.
-		 */
-		.ai_canonname = NULL,
-	};
-
-	/* Try getaddrinfo many times, sleep a bit between retries */
-	do {
-		err = getaddrinfo(SUPL_SERVER, NULL, &hints, &info);
-		gai_cnt++;
-
-		if (err) {
-			if (gai_cnt < GAI_ATTEMPT_COUNT) {
-				/* Sleep between retries */
-				k_sleep(K_MSEC(1000 * gai_cnt));
-			} else {
-				/* Return if no success after many retries */
-				printk("Failed to resolve hostname %s on IPv4, errno: %d)\n",
-					SUPL_SERVER, errno);
-
-				return -1;
-			}
-		}
-	} while (err);
-
-	/* Create socket */
-	supl_fd = socket(AF_INET, SOCK_STREAM, proto);
-	if (supl_fd < 0) {
-		printk("Failed to create socket, errno %d\n", errno);
-		goto cleanup;
+	if (rc < 0 && (errno == EAGAIN)) {
+		/* Return 0 to indicate a timeout. */
+		rc = 0;
+	} else if (rc == 0) {
+		/* Peer closed the socket, return an error. */
+		rc = -1;
 	}
 
-	struct timeval timeout = {
-		.tv_sec = 1,
-		.tv_usec = 0,
-	};
+	return rc;
+}
 
-	err = setsockopt(supl_fd,
-			 NRF_SOL_SOCKET,
-			 NRF_SO_RCVTIMEO,
-			 &timeout,
-			 sizeof(timeout));
-	if (err) {
-		printk("Failed to setup socket timeout, errno %d\n", errno);
+static ssize_t supl_write(const void *p_buff, size_t nbytes, void *user_data)
+{
+	ARG_UNUSED(user_data);
+
+	return send(supl_fd, p_buff, nbytes, 0);
+}
+
+static int inject_agps_type(void *agps, size_t agps_size, uint16_t type, void *user_data)
+{
+	ARG_UNUSED(user_data);
+
+	int retval = nrf_modem_gnss_agps_write(agps, agps_size, type);
+
+	if (retval != 0) {
+		LOG_ERR("Failed to write A-GPS data, type: %d (errno: %d)", type, errno);
 		return -1;
 	}
 
-	/* Not connected */
-	err = -1;
-
-	for (addr = info; addr != NULL; addr = addr->ai_next) {
-		struct sockaddr *const sa = addr->ai_addr;
-
-		switch (sa->sa_family) {
-		case AF_INET6:
-			((struct sockaddr_in6 *)sa)->sin6_port = port;
-			break;
-		case AF_INET:
-			((struct sockaddr_in *)sa)->sin_port = port;
-			char ip[255] = { 0 };
-
-			inet_ntop(NRF_AF_INET,
-				  (void *)&((struct sockaddr_in *)
-				  sa)->sin_addr,
-				  ip,
-				  255);
-			printk("ip %s (%x) port %d\n",
-				ip,
-				((struct sockaddr_in *)sa)->sin_addr.s_addr,
-				ntohs(port));
-			break;
-		}
-
-		err = connect(supl_fd, sa, addr->ai_addrlen);
-		if (err) {
-			/* Try next address */
-			printk("Unable to connect, errno %d\n", errno);
-		} else {
-			/* Connected */
-			break;
-		}
-	}
-
-cleanup:
-	freeaddrinfo(info);
-
-	if (err) {
-		/* Unable to connect, close socket */
-		close(supl_fd);
-		supl_fd = -1;
-	}
+	LOG_INF("Injected A-GPS data, type: %d, size: %d", type, agps_size);
 
 	return 0;
 }
 
-void close_supl_socket(void)
-{
-	if (close(supl_fd) < 0) {
-		printk("Failed to close SUPL socket\n");
-	}
-}
-
-ssize_t supl_write(const void *p_buff, size_t nbytes, void *user_data)
-{
-	ARG_UNUSED(user_data);
-	return send(supl_fd, p_buff, nbytes, 0);
-}
-
-int supl_logger(int level, const char *fmt, ...)
+static int supl_logger(int level, const char *fmt, ...)
 {
 	char buffer[256] = { 0 };
 	va_list args;
@@ -153,26 +71,148 @@ int supl_logger(int level, const char *fmt, ...)
 	va_end(args);
 
 	if (ret < 0) {
-		printk("%s: encoding error\n", __func__);
+		LOG_ERR("%s: encoding error", __func__);
 		return ret;
 	} else if ((size_t)ret >= sizeof(buffer)) {
-		printk("%s: too long message,"
-		       "it will be cut short\n", __func__);
+		LOG_ERR("%s: too long message,"
+		       "it will be cut short", __func__);
 	}
 
-	printk("%s\n", buffer);
+	LOG_INF("%s", buffer);
 
 	return ret;
 }
 
-ssize_t supl_read(void *p_buff, size_t nbytes, void *user_data)
+static int open_supl_socket(void)
 {
-	ARG_UNUSED(user_data);
-	ssize_t rc = recv(supl_fd, p_buff, nbytes, 0);
+	int err;
+	char port[6];
+	struct addrinfo *info;
 
-	if (rc < 0 && (errno == ETIMEDOUT)) {
-		return 0;
+	struct addrinfo hints = {
+		.ai_flags = AI_NUMERICSERV,
+		.ai_family = AF_UNSPEC, /* Both IPv4 and IPv6 addresses accepted. */
+		.ai_socktype = SOCK_STREAM
+	};
+
+	snprintf(port, sizeof(port), "%d", SUPL_SERVER_PORT);
+
+	err = getaddrinfo(SUPL_SERVER, port, &hints, &info);
+	if (err) {
+		LOG_ERR("Failed to resolve hostname %s, error: %d", SUPL_SERVER, err);
+
+		return -1;
 	}
 
-	return rc;
+	/* Not connected. */
+	err = -1;
+
+	for (struct addrinfo *addr = info; addr != NULL; addr = addr->ai_next) {
+		char ip[INET6_ADDRSTRLEN] = { 0 };
+		struct sockaddr *const sa = addr->ai_addr;
+
+		supl_fd = socket(sa->sa_family, SOCK_STREAM, IPPROTO_TCP);
+		if (supl_fd < 0) {
+			LOG_ERR("Failed to create socket, errno %d", errno);
+			goto cleanup;
+		}
+
+		/* The SUPL library expects a 1 second timeout for the read function. */
+		struct timeval timeout = {
+			.tv_sec = 1,
+			.tv_usec = 0,
+		};
+
+		err = setsockopt(supl_fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+		if (err) {
+			LOG_ERR("Failed to set socket timeout, errno %d", errno);
+			goto cleanup;
+		}
+
+		inet_ntop(sa->sa_family,
+			  (void *)&((struct sockaddr_in *)sa)->sin_addr,
+			  ip,
+			  INET6_ADDRSTRLEN);
+		LOG_INF("Connecting to %s port %d", ip, SUPL_SERVER_PORT);
+
+		err = connect(supl_fd, sa, addr->ai_addrlen);
+		if (err) {
+			close(supl_fd);
+			supl_fd = -1;
+
+			/* Try the next address. */
+			LOG_WRN("Connecting to server failed, errno %d", errno);
+		} else {
+			/* Connected. */
+			break;
+		}
+	}
+
+cleanup:
+	freeaddrinfo(info);
+
+	if (err) {
+		/* Unable to connect, close socket. */
+		LOG_ERR("Could not connect to SUPL server");
+		if (supl_fd > -1) {
+			close(supl_fd);
+			supl_fd = -1;
+		}
+		return -1;
+	}
+
+	return 0;
+}
+
+static void close_supl_socket(void)
+{
+	if (close(supl_fd) < 0) {
+		LOG_ERR("Failed to close SUPL socket");
+	}
+}
+
+int assistance_init()
+{
+
+	static struct supl_api supl_api = {
+		.read       = supl_read,
+		.write      = supl_write,
+		.handler    = inject_agps_type,
+		.logger     = supl_logger,
+		.counter_ms = k_uptime_get
+	};
+
+	if (supl_init(&supl_api) != 0) {
+		LOG_ERR("Failed to initialize SUPL library");
+		return -1;
+	}
+
+	return 0;
+}
+
+int assistance_request(struct nrf_modem_gnss_agps_data_frame *agps_request)
+{
+	int err;
+
+	assistance_active = true;
+
+	err = open_supl_socket();
+	if (err) {
+		goto exit;
+	}
+
+	LOG_INF("Starting SUPL session");
+	err = supl_session(agps_request);
+	LOG_INF("Done");
+	close_supl_socket();
+
+exit:
+	assistance_active = false;
+
+	return err;
+}
+
+bool assistance_is_active(void)
+{
+	return assistance_active;
 }

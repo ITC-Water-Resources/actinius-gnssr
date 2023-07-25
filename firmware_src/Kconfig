@@ -25,6 +25,27 @@ config UPLOAD_CLIENT
         select NRF_MODEM_LIB
         select HTTP_CLIENT
 
+config GNSSR_VERSION
+	string "Set GNSS-R app version"
+        default "V1.0"
+        help
+	  Sets app version to be printed when board info is requested
+
+config GNSSR_CONTACT
+	string "Set contact information"
+        default "https://github.com/ITC-Water-Resources/actinius-gnssr"
+        help
+	  Sets the contact info to be printed when board info is requested
+
+#config BOARD_SELECT_SIM_EXTERNAL
+      #bool "select external sim instead of esim"
+      #default n
+      #help 
+        #select external sim instead of esim
+
+        
+
+
 source "${NRF_BASE}/lib/supl/Kconfig" 
 
 source "subsys/logging/Kconfig.template.log_config"

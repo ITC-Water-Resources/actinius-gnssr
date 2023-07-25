@@ -5,26 +5,26 @@
 refactored and modified from the fat_fs zephyr example by Tavish Naruka <tavishnaruka@gmail.com>
 */
 
-#include <device.h>
-#include <disk/disk_access.h>
-#include <fs/fs.h>
-#include <ff.h>
-#include <fs/fs_interface.h>
+#include <zephyr/device.h>
+#include <zephyr/storage/disk_access.h>
+#include <zephyr/fs/fs.h>
+#include <zephyr/fs/fs_interface.h>
 #include <string.h>
-
+#include <ff.h>
 
 #include "featherw_datalogger.h"
-#include <sys/types.h>
+#include <zephyr/types.h>
 
-#include <logging/log.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(GNSSR,CONFIG_GNSSR_LOG_LEVEL);
 
 
 static FATFS fat_fs;
 /* mounting info */
-static struct fs_mount_t mp = {
+static struct fs_mount_t mp = { 
 	.type = FS_FATFS,
 	.fs_data = &fat_fs,
+
 };
 static const char *disk_mount_pt = "/SD:";
 static const char *sddata= "/SD:/data";
@@ -64,7 +64,7 @@ int mount_sdcard(void)
 	LOG_INF("Sector size %u\n", block_size);
 
 	memory_size_mb = (uint64_t)block_count * block_size;
-	LOG_DBG("Memory Size(MB) %u\n", (uint32_t)(memory_size_mb >> 20));
+	LOG_INF("Memory Size(MB) %u\n", (uint32_t)(memory_size_mb >> 20));
 
 	mp.mnt_point = disk_mount_pt;
 
@@ -73,7 +73,7 @@ int mount_sdcard(void)
 	if (res == FR_OK) {
 		return FEA_SUCCESS;
 	} else {
-		LOG_ERR("Unable to mount SD card");
+		LOG_ERR("Unable to mount SD card, error %d",res);
 		return FEA_ERR_MOUNT;
 	}
 
@@ -205,9 +205,10 @@ int lsdir_init(const char * dirpath, struct fs_dir_t * dirp){
 	/* Verify fs_opendir() */
 	res = fs_opendir(dirp, dirpath);
 	if (res) {
-		printk("Error opening dir %s [%d]\n", dirpath, res);
+		LOG_ERR("Error opening dir %s [%d]\n", dirpath, res);
 		return res;
 	}
+	return res;
 }
 
 int lsdir_close(struct fs_dir_t * dirp){
@@ -228,7 +229,7 @@ int lsdir_next(const char * endswith, struct fs_dir_t * dirp, char * path){
 		}
 
 		if (entry.type == FS_DIR_ENTRY_DIR) {
-			LOG_DBG("[DIR ] %s\n", log_strdup(entry.name));
+			LOG_DBG("[DIR ] %s\n", entry.name);
 		} else {
 
 			/* apply filter criteria to a file*/

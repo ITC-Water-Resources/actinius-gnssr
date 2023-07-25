@@ -20,6 +20,7 @@ struct webdav_config {
 
 struct config {
 	char filebase[20];
+	int agps;
 	int upload;
 #ifdef CONFIG_UPLOAD_CLIENT
 	struct webdav_config webdav;
@@ -35,6 +36,7 @@ struct device_status {
 	float longitude;
 	float latitude;
 	float height;
+	float batvoltage;
 };
 
 int write_status(const char *file, const struct device_status * status);

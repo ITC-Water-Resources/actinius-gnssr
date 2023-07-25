@@ -1,5 +1,5 @@
 
-/* Copyright 2022, Roelof Rietbroek (r.rietbroek@utwente.nl)
+/* Copyright 2023, Roelof Rietbroek (r.rietbroek@utwente.nl)
  * License: see license file
  * read and write configuration in json format
  */
@@ -7,10 +7,10 @@
 #include <cJSON.h>
 #include "config.h"
 #include "featherw_datalogger.h"
-#include <fs/fs.h>
+#include <zephyr/fs/fs.h>
 #include <string.h>
-#include <sys/base64.h>
-#include <logging/log.h>
+#include <zephyr/sys/base64.h>
+#include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(GNSSR,CONFIG_GNSSR_LOG_LEVEL);
 
 #define JSONBUFLEN 2400
@@ -21,8 +21,13 @@ static char jsonbuf[JSONBUFLEN];
 
 void set_defaults(struct config * conf){
 	strcpy(conf->filebase,"icarus_gnssr0");
-	conf->upload=1;
+	conf->upload=0;
+	conf->agps=0;
+#ifdef CONFIG_SUPL_CLIENT_LIB
+	conf->agps=1;
+#endif
 #ifdef CONFIG_UPLOAD_CLIENT
+	conf->upload=1;
 	strcpy(conf->webdav.host,"httpbin.org");
 	strcpy(conf->webdav.url,"/put");
 	strcpy(conf->webdav.auth,"testuser:testpassword");
@@ -43,12 +48,13 @@ int read_config(struct config *conf){
 	}
 	
 	struct fs_file_t fid;
-	
+	fs_file_t_init(&fid);
+
 	if (file_exists(configfile)){
-		LOG_INF("Reading config from %s\n",log_strdup(configfile));
+		LOG_INF("Reading config from %s\n",configfile);
 		/* read from file */
 		if ( fs_open(&fid,configfile,FS_O_READ)!=0){
-			LOG_ERR("cannot open configfile %s for reading",log_strdup(configfile));
+			LOG_ERR("cannot open configfile %s for reading",configfile);
 			return CONF_ERR;
 
 		}
@@ -71,11 +77,16 @@ int read_config(struct config *conf){
 		cJSON *upload= cJSON_GetObjectItemCaseSensitive(monitor, "upload");
 
 		conf->upload=upload->valueint;
+		
+		cJSON *agps= cJSON_GetObjectItemCaseSensitive(monitor, "agps");
+
+		conf->agps=agps->valueint;
 
 		cJSON * filebase=cJSON_GetObjectItemCaseSensitive(monitor,"filebase");
 
 		strcpy(conf->filebase,filebase->valuestring);
-		
+	
+
 #ifdef CONFIG_UPLOAD_CLIENT
 		/* get webdav items */
 		cJSON * webdav=cJSON_GetObjectItemCaseSensitive(monitor,"webdav");
@@ -91,7 +102,7 @@ int read_config(struct config *conf){
 		size_t nwr=0;
 		size_t prefixlen=strlen(AUTH_PREFIX);
 		strcpy(conf->webdav.auth,AUTH_PREFIX);
-		LOG_INF("%d %d %d %s\n",sizeof(conf->webdav.auth),prefixlen,strlen(auth->valuestring),log_strdup(auth->valuestring));
+		LOG_INF("%d %d %d %s\n",sizeof(conf->webdav.auth),prefixlen,strlen(auth->valuestring),auth->valuestring);
 		(void)base64_encode(&conf->webdav.auth[0]+prefixlen,0,&nwr,auth->valuestring,strlen(auth->valuestring));
 		LOG_INF("required base64 buffer size %d\n",nwr);
 		if(base64_encode(&conf->webdav.auth[0]+prefixlen,sizeof(conf->webdav.auth)-prefixlen,&nwr,auth->valuestring,strlen(auth->valuestring)) != 0){
@@ -102,7 +113,7 @@ int read_config(struct config *conf){
 		memcpy(&conf->webdav.auth[0]+prefixlen+nwr,"\r\n\0",3);
 		/*strncat(conf->webdav.auth+nwr,"\r\n",2);*/
 		printk(conf->webdav.auth);
-		LOG_INF("base64 encoded Authentication header:\n%d %s\n",nwr,log_strdup(conf->webdav.auth));
+		LOG_INF("base64 encoded Authentication header:\n%d %s\n",nwr,conf->webdav.auth);
 
 		cJSON *usetls= cJSON_GetObjectItemCaseSensitive(webdav, "usetls");
 
@@ -136,8 +147,17 @@ int read_config(struct config *conf){
 		
 		cJSON * monitor = cJSON_CreateObject();
 		cJSON_AddNumberToObject(monitor,"upload",conf->upload);
+		cJSON_AddNumberToObject(monitor,"agps",conf->upload);
 		cJSON_AddStringToObject(monitor,"filebase",conf->filebase);
-		
+
+#ifdef CONFIG_GNSSR_VERSION
+		cJSON_AddStringToObject(monitor,"version",CONFIG_GNSSR_VERSION);
+#endif
+
+#ifdef CONFIG_GNSSR_CONTACT
+		cJSON_AddStringToObject(monitor,"contact",CONFIG_GNSSR_CONTACT);
+#endif
+
 #ifdef CONFIG_UPLOAD_CLIENT
 		/* add webdav items */
 		cJSON * webdav= cJSON_CreateObject();
@@ -162,8 +182,9 @@ int read_config(struct config *conf){
 		}
 
 		/* write to file */
-		if ( fs_open(&fid,configfile,FS_O_WRITE|FS_O_CREATE)!=0){
-			LOG_ERR("cannot open configfile %s",configfile);
+		retcode= fs_open(&fid,configfile,FS_O_WRITE|FS_O_CREATE);
+		if ( retcode != 0){
+			LOG_ERR("cannot open configfile %s, err %d",configfile,retcode);
 			return CONF_ERR;
 
 		}
@@ -184,6 +205,7 @@ int write_status(const char *file, const struct device_status * status){
 		cJSON_AddNumberToObject(monitor,"longitude",status->longitude);
 		cJSON_AddNumberToObject(monitor,"latitude",status->latitude);
 		cJSON_AddNumberToObject(monitor,"height",status->height);
+		cJSON_AddNumberToObject(monitor,"batvoltage",status->batvoltage);
 		
 		/* print json to string */
 		int retcode= cJSON_PrintPreallocated(monitor,jsonbuf,JSONBUFLEN,1);
@@ -197,6 +219,7 @@ int write_status(const char *file, const struct device_status * status){
 
 		struct fs_file_t fid;
 		
+		fs_file_t_init(&fid);
 		/* write to file */
 		if ( fs_open(&fid,file,FS_O_WRITE|FS_O_CREATE)!=0){
 			LOG_ERR("cannot open statusfile %s",file);
