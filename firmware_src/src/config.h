@@ -1,4 +1,5 @@
 
+#include <stdint.h>
 #define CONF_SUCCESS 0
 
 #define CONF_ERR 1
@@ -34,9 +35,11 @@ struct device_status {
 	float uptime;
 	float longitude;
 	float latitude;
-	float height;
+	float altitude;
+	uint16_t battery_mvolt[24];
+
 };
 
-int write_status(const char *file, const struct device_status * status);
+int get_jsonstatus(char *jsonbuffer, int buflen, const struct device_status * status);
 
 #endif

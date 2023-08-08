@@ -18,6 +18,27 @@
 #include "lz4file.h"
 #include "config.h"
 
+#ifdef CONFIG_ADC
+/* Include adc drivers for battery voltage measurement */
+#include <drivers/adc.h>
+#define BATVOLT_R1 4.7f                 // MOhm
+#define BATVOLT_R2 10.0f                // MOhm
+#define INPUT_VOLT_RANGE 3.6f           // Volts
+#define VALUE_RANGE_10_BIT 1.023        // (2^10 - 1) / 1000
+
+#define ADC_DEV "ADC_0"
+
+#define ADC_RESOLUTION 10
+#define ADC_GAIN ADC_GAIN_1_6
+#define ADC_REFERENCE ADC_REF_INTERNAL
+#define ADC_ACQUISITION_TIME ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS, 10)
+#define ADC_1ST_CHANNEL_ID 0
+#define ADC_1ST_CHANNEL_INPUT SAADC_CH_PSELP_PSELP_AnalogInput0
+#define BUFFER_SIZE 1
+#endif 
+
+static uint8_t hrprev=24; /*invalid hour so initial battery voltage measurement is always triggered*/
+
 #ifdef CONFIG_UPLOAD_CLIENT
 #include "uploadclient.h"
 #endif 
@@ -223,6 +244,112 @@ int led_button_checker(void){
 K_THREAD_DEFINE(led_button_checker_id, STACKSIZE, led_button_checker, NULL, NULL, NULL,
 		PRIORITY, 0, 0);
 
+#ifdef CONFIG_ADC
+static int16_t m_sample_buffer[BUFFER_SIZE];
+
+static const struct device *adc_dev;
+
+static const struct adc_channel_cfg m_1st_channel_cfg = {
+	.gain = ADC_GAIN,
+	.reference = ADC_REFERENCE,
+	.acquisition_time = ADC_ACQUISITION_TIME,
+	.channel_id = ADC_1ST_CHANNEL_ID,
+	.input_positive   = ADC_1ST_CHANNEL_INPUT,
+};
+
+static int get_battery_voltage(uint16_t *battery_voltage)
+{
+	int err;
+
+	const struct adc_sequence sequence = {
+		.channels = BIT(ADC_1ST_CHANNEL_ID),
+		.buffer = m_sample_buffer,
+		.buffer_size = sizeof(m_sample_buffer), // in bytes!
+		.resolution = ADC_RESOLUTION,
+	};
+
+	if (!adc_dev) {
+		return -1;
+	}
+
+	err = adc_read(adc_dev, &sequence);
+	if (err) {
+		LOG_ERR("ADC read err: %d\n", err);
+
+		return err;
+	}
+
+	float sample_value = 0;
+	for (int i = 0; i < BUFFER_SIZE; i++) {
+		sample_value += (float) m_sample_buffer[i];
+	}
+	sample_value /= BUFFER_SIZE;
+
+	*battery_voltage = (uint16_t)(sample_value * (INPUT_VOLT_RANGE / VALUE_RANGE_10_BIT) * ((BATVOLT_R1 + BATVOLT_R2) / BATVOLT_R2));
+
+	return 0;
+}
+
+bool init_adc()
+{
+	int err;
+
+	adc_dev = device_get_binding(ADC_DEV);
+	if (!adc_dev) {
+		LOG_ERR("Error getting " ADC_DEV " failed\n");
+
+		return false;
+	}
+
+	err = adc_channel_setup(adc_dev, &m_1st_channel_cfg);
+	if (err) {
+		LOG_ERR("Error in adc setup: %d\n", err);
+
+		return false;
+	}
+
+	return true;
+}
+
+
+#endif
+
+int update_device_status(int init){
+	if(init){
+		LOG_INF("Initializing device status");
+		strcpy(dev_status.device_id,confdata.filebase);
+		dev_status.longitude=0.0;
+		dev_status.altitude=0.0;
+		dev_status.latitude=0.0;
+		for(int i=0; i< 24;i++){
+			dev_status.battery_mvolt[i]=9999;
+		}
+	}else{
+		///Only do this every hour 
+		uint8_t hr=last_pvt.pvt.datetime.hour;
+		if(hrprev != hr){
+			LOG_INF("Updating device status");
+			dev_status.longitude=last_pvt.pvt.longitude;
+			dev_status.altitude=last_pvt.pvt.altitude;
+			dev_status.latitude=last_pvt.pvt.latitude;
+			
+#ifdef CONFIG_ADC
+			get_battery_voltage(&dev_status.battery_mvolt[hr]);
+			LOG_INF("Battery Voltage %d [mV]",dev_status.battery_mvolt[hr]);
+#endif
+
+			hrprev=hr;
+		}
+	}
+	
+	///update status
+	dev_status.uptime=k_uptime_get()/(MSEC_PER_SEC*3600.0);
+
+	return 0;
+
+}
+
+
 #if defined(CONFIG_UPLOAD_CLIENT) || defined(CONFIG_SUPL_CLIENT_LIB)
 /* Accepted network statuses read from modem */
 static const char status1[] = "+CEREG: 1";
@@ -249,25 +376,30 @@ static int activate_lte(bool activate)
 
 		at_notif_register_handler(NULL, wait_for_lte);
 		if (at_cmd_write("AT+CEREG=2", NULL, 0, NULL) != 0) {
-			return -1;
+			return -2;
 		}
 		
 
 		if (k_sem_take(&lte_ready, K_MSEC(30000)) != 0){
-			return -1;
+			/*clean up */
+			at_notif_deregister_handler(NULL, wait_for_lte);
+			at_cmd_write(AT_DEACTIVATE_LTE, NULL, 0, NULL);
+			return -3;
 		}
 
 		
 		at_notif_deregister_handler(NULL, wait_for_lte);
 		if (at_cmd_write("AT+CEREG=0", NULL, 0, NULL) != 0) {
-			return -1;
+			return -4;
 		}
 	} else {
 		if (at_cmd_write(AT_DEACTIVATE_LTE, NULL, 0, NULL) != 0) {
-			return -1;
+			return -5;
 		}
 	}
 
+	/*wait for a second just in case*/
+	k_sleep(K_MSEC(1000));
 	return 0;
 }
 
@@ -288,7 +420,6 @@ static int gnss_ctrl(uint32_t ctrl)
 	/* allow low elevation tracking */
 	nrf_gnss_elevation_mask_t gnss_lowelev = 2;
 
-	nrf_setsockopt(gnss_fd, NRF_SOL_GNSS, NRF_SO_GNSS_FIX_INTERVAL, &fix_interval, sizeof(fix_interval));	
 
 	
 	if (ctrl == GNSS_INIT_AND_START) {
@@ -342,6 +473,20 @@ static int gnss_ctrl(uint32_t ctrl)
 			LOG_ERR("Failed to set low elevation mask\n");
 			return -1;
 		}
+	
+		/*set duty cycling mode */
+		/*nrf_gnss_power_save_mode_t psm=NRF_GNSS_PSM_DUTY_CYCLING_PERFORMANCE;*/
+		nrf_gnss_power_save_mode_t psm=NRF_GNSS_PSM_DUTY_CYCLING_POWER;
+    		nrf_socklen_t psm_len = sizeof(psm);
+		retval = nrf_setsockopt(gnss_fd,
+					NRF_SOL_GNSS,
+					NRF_SO_GNSS_POWER_SAVE_MODE,
+					&psm,psm_len);
+		if (retval != 0) {
+			LOG_ERR("Failed to set power GNSS duty cycling mode\n");
+			return -1;
+		}
+
 	}
 
 	if ((ctrl == GNSS_INIT_AND_START) ||
@@ -369,6 +514,7 @@ static int gnss_ctrl(uint32_t ctrl)
 		}
 	}
 
+	k_sleep(K_MSEC(2000));
 	return 0;
 }
 
@@ -387,11 +533,18 @@ void sync_files(){
 		(void) lsdir_init(datadir, &dirp);	
 
 		bool lte_active=false;
-		
+		int err;		
 		while(lsdir_next(".lz4",&dirp,lz4file) == 0){
 			if(!lte_active){
 				gnss_ctrl(GNSS_STOP);
-				activate_lte(true);
+				err=activate_lte(true);
+				if(err!=0){
+					LOG_INF("Could not establish LTE connection (error %d), skipping uploads, but restarting GNSS",err);
+					gnss_ctrl(GNSS_RESTART);
+					break;
+
+				
+				}
 				LOG_INF("Established LTE link\n");
 				lte_active=true;
 			}
@@ -399,7 +552,7 @@ void sync_files(){
 			printk("Uploading lz4file found %s\n",lz4fullfile);
 			if(webdavUploadFile(lz4fullfile,&confdata) == UPLOADCLNT_SUCCESS){
 				/*rename file */
-				LOG_INF("Sucessfully uploaded file %s, renaming",log_strdup(lz4file));
+				LOG_INF("Successfully uploaded file %s, renaming",log_strdup(lz4file));
 				strcpy(lz4renamed,lz4fullfile);
 				strcat(lz4renamed,"_ok");
 				fs_rename(lz4fullfile,lz4renamed);
@@ -416,32 +569,11 @@ void sync_files(){
 		if (lte_active){
 			LOG_INF("Closing LTE link and restarting GNSS\n");
 			activate_lte(false);
-			k_sleep(K_MSEC(1000));
 			gnss_ctrl(GNSS_RESTART);
-			k_sleep(K_MSEC(1000));
 			lte_active=false;
 		}
 
 		
-		/*char uploadfilename[100];*/
-
-		/*[>temporary dummy file to upload<]*/
-		/*if(get_sd_config_path(uploadfilename,"status.json")!= FEA_SUCCESS){*/
-			/*LOG_ERR("Cannot set uploadfile");*/
-		/*}*/
-		/*[> write status as JSON to file<]*/
-		/*if(write_status(uploadfilename,&dev_status) != CONF_SUCCESS){*/
-			/*LOG_ERR("Cannot write uploadfile");*/
-		/*}*/
-		/*[>end temporary dummy file<]*/
-
-		/*if(uploadFile(uploadfilename,&confdata) != UPLOADCLNT_SUCCESS){*/
-			/*LOG_ERR("Failed to upload file,continuing");*/
-
-		/*}	*/
-
-
-		/*sync operation ..*/
 		led_status=led_status_old;
 
 	}else{
@@ -564,6 +696,10 @@ int rollover_lz4log(lz4streamfile * lz4fid){
 	
 		return -1;
 	}
+	///Write JSON header with the device status
+	char jsonstatus[500];
+	get_jsonstatus(jsonstatus,500,&dev_status);
+	lz4write(lz4fid,jsonstatus);
 	log_timestamp=k_uptime_get();
 
 	return 0;
@@ -581,23 +717,12 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 			  gnss_data,
 			  sizeof(nrf_gnss_data_frame_t),
 			  NRF_MSG_DONTWAIT);
-
-	if (retval <= 0){
-		/* add a period of mindfullness to wait for more data */
-		k_sleep(K_MSEC(600));
+	if(retval <0){
+			/* Possibly no data available: add a period of mindfullness to wait for more data */
+			k_sleep(K_MSEC(600));
+			return retval;
 	}
 
-	/*if (retval == -1){*/
-		/*led_status=LED_ERROR;*/
-		/*LOG_ERR("ERROR reading gnss_data frame trying to restart GNSS\n");*/
-		
-		/*gnss_ctrl(GNSS_STOP);*/
-		/*k_sleep(K_MSEC(2000));*/
-		
-		/*gnss_ctrl(GNSS_RESTART);*/
-		/*k_sleep(K_MSEC(2000));*/
-		/*return retval;*/
-	/*}*/
 
 	if (retval > 0) {
 
@@ -628,6 +753,9 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 				led_status=LED_LOGGING;
 				fix_timestamp = k_uptime_get();
 				++fix_counter;
+
+				update_device_status(0);
+
 				if (log_rollover || !lz4fid->isOpen){
 					print_housekeeping_data(&last_pvt);
 					rollover_lz4log(lz4fid);
@@ -635,20 +763,23 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 					button_pressed=false;
 
 #ifdef CONFIG_UPLOAD_CLIENT
-					sync_files();
+					/*at least 30 fixes (30 seconds) need to be obtained to start an actualy file upload*/ 
+					if (fix_counter > 30){
+						sync_files();
+					}
 #endif
 
 				}
 
 			}else{
-				led_status=LED_SEARCHING;
+				fix_counter=0; 
 			}
 			break;
 
 		case NRF_GNSS_NMEA_DATA_ID:
+			LOG_DBG("NMEA: %s",log_strdup(gnss_data->nmea));	
 			if (got_fix && lz4fid->isOpen){
 				/* put nmea data in the lz4log if it's open*/
-				
 				lz4write(lz4fid,gnss_data->nmea);
 			}else if (got_fix && !lz4fid->isOpen){
 				/*reopen file (we actually don;t expect to land here nbut just in case*/
@@ -666,17 +797,20 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 			printk("New AGPS data requested, contacting SUPL server, flags %d\n",
 			       gnss_data->agps.data_flags);
 			gnss_ctrl(GNSS_STOP);
-			activate_lte(true);
-			LOG_INF("Established LTE link\n");
-			if (open_supl_socket() == 0) {
-				LOG_INF("Starting SUPL session\n");
-				supl_session(&gnss_data->agps);
-				LOG_INF("Done\n");
-				close_supl_socket();
+			int err=activate_lte(true);
+			if( err ==0){
+				LOG_INF("Established LTE link\n");
+				if (open_supl_socket() == 0) {
+					LOG_INF("Starting SUPL session\n");
+					supl_session(&gnss_data->agps);
+					LOG_INF("Done\n");
+					close_supl_socket();
+				}
+				activate_lte(false);
+			}else{
+				LOG_INF("Could not establish LTE link (error %d), skipping agps request",err);
 			}
-			activate_lte(false);
 			gnss_ctrl(GNSS_RESTART);
-			k_sleep(K_MSEC(2000));
 #endif
 			break;
 
@@ -747,7 +881,6 @@ void print_deviceinfo(void){
 
 
 
-
 int main(void)
 {
 	nrf_gnss_data_frame_t gnss_data;
@@ -763,6 +896,11 @@ int main(void)
 	};
 #endif
 
+#ifdef CONFIG_ADC
+	init_adc();
+	LOG_INF("Initializing battery voltage monitoring\n");
+
+#endif
 	LOG_INF("Mounting and initializing featherwing sdcard\n");
 
 	if (mount_sdcard() != FEA_SUCCESS){
@@ -785,11 +923,7 @@ int main(void)
 	print_deviceinfo();
 
 	/*initialize status*/
-	strcpy(dev_status.device_id,confdata.filebase);
-	dev_status.uptime=k_uptime_get()/(MSEC_PER_SEC*3600.0);
-	dev_status.longitude=0.0;
-	dev_status.height=0.0;
-	dev_status.latitude=0.0;
+	update_device_status(1);
 
 #ifdef CONFIG_UPLOAD_CLIENT
 	/* register TLS certificate in the modem */
@@ -828,7 +962,6 @@ int main(void)
 			 * data to read
 			 */
 		} while (process_gnss_data(&gnss_data,&lz4fid) > 0);
-		
 		
 		if (!got_fix) {
 			print_searching(&last_pvt,++cnt);

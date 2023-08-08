@@ -23,6 +23,13 @@ Fromea long-term perspective, there are a few other advantages which justify dev
 
 # Release history
 
+## Release 1.1 for Icarus v1.4, 8 August 2023
+### Remarks
+* Add device status as logging file header
+* Added battery voltage logging in the device status
+* Enable GNSS duty cycling mode (hopefully will use less battery)
+* Uses modem firmware 1.2.7 and NRF 1.5.1 buildchain
+
 ## First release 1.0 for Icarus v1.4 29 March 2023
 ### Remarks (known issues)
 * The TLS certificate authority certficate is currently hard-baked in the firmware, allowing file uploads through webdav to surfdrive.surf.nl, even though the configuration shows a tls certificate. If you want uploading functionality to a different server a rebuild is needed with a different TLS certicate. The intention is to change this in later releases so users can supply their own certificate through the [configuration file](config/config.json.default).

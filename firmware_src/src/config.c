@@ -177,16 +177,21 @@ int read_config(struct config *conf){
 
 
 
-int write_status(const char *file, const struct device_status * status){
+int get_jsonstatus(char *jsonbuffer, int buflen, const struct device_status * status){
 		cJSON * monitor = cJSON_CreateObject();
 		cJSON_AddStringToObject(monitor,"device_id",status->device_id);
 		cJSON_AddNumberToObject(monitor,"uptime",status->uptime);
 		cJSON_AddNumberToObject(monitor,"longitude",status->longitude);
 		cJSON_AddNumberToObject(monitor,"latitude",status->latitude);
-		cJSON_AddNumberToObject(monitor,"height",status->height);
-		
-		/* print json to string */
-		int retcode= cJSON_PrintPreallocated(monitor,jsonbuf,JSONBUFLEN,1);
+		cJSON_AddNumberToObject(monitor,"altitude",status->altitude);
+		cJSON * bat_array = cJSON_AddArrayToObject(monitor, "battery_mvolt");
+		for (int i =0 ;i<24; i++){
+			cJSON *batmvolt=cJSON_CreateNumber(status->battery_mvolt[i]);
+			cJSON_AddItemToArray(bat_array, batmvolt);
+		}
+
+		/*[> print json to string <]*/
+		int retcode= cJSON_PrintPreallocated(monitor,jsonbuffer,buflen,1);
 
 
 		cJSON_Delete(monitor);
@@ -194,18 +199,20 @@ int write_status(const char *file, const struct device_status * status){
 			LOG_ERR("cannot encode in JSON");
 			return CONF_ERR;
 		}
+		//add a line end
+		strcat(jsonbuffer,"\n");
 
-		struct fs_file_t fid;
+		/*struct fs_file_t fid;*/
 		
-		/* write to file */
-		if ( fs_open(&fid,file,FS_O_WRITE|FS_O_CREATE)!=0){
-			LOG_ERR("cannot open statusfile %s",file);
-			return CONF_ERR;
+		/*[>[> write to file <]<]*/
+		/*if ( fs_open(&fid,file,FS_O_WRITE|FS_O_CREATE)!=0){*/
+			/*LOG_ERR("cannot open statusfile %s",file);*/
+			/*return CONF_ERR;*/
 
-		}
+		/*}*/
 		
-		fs_write(&fid,jsonbuf, strlen(jsonbuf));
-		fs_close(&fid);
+		/*fs_write(&fid,jsonbuf, strlen(jsonbuf));*/
+		/*fs_close(&fid);*/
 
 		return CONF_SUCCESS;
 }
