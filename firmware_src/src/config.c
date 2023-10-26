@@ -43,7 +43,7 @@ void set_defaults(struct config * conf){
 
 int read_config(struct config *conf){
 	char configfile[100];
-	if(get_sd_config_path(configfile,"config.json")!= FEA_SUCCESS){
+	if(get_sd_config_path(configfile,"config_" CONFIG_GNSSR_VERSION ".json")!= FEA_SUCCESS){
 		return CONF_ERR;
 	}
 	

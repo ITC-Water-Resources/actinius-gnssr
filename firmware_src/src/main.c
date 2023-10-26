@@ -190,6 +190,8 @@ int main(void)
 			return -1;
 		}
 	}
+#else
+	LOG_INF("App firmware does not support uploading through LTE-M, disabling\n");
 
 #endif
 	LOG_INF("Starting GNSS-R logger application\n");
