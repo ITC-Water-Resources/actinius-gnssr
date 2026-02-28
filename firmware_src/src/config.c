@@ -13,7 +13,7 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_DECLARE(GNSSR,CONFIG_GNSSR_LOG_LEVEL);
 
-#define JSONBUFLEN 2400
+#define JSONBUFLEN 3000
 
 #define AUTH_PREFIX "Authorization: Basic "
 
