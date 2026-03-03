@@ -13,7 +13,7 @@ struct webdav_config {
 	char url[100];
 	char auth[120];
 	int usetls;
-	char tlscert[2200];
+	char tlscert[2400];
 
 };
 

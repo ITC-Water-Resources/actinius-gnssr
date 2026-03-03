@@ -95,7 +95,7 @@ int open_supl_socket(void)
 			((struct sockaddr_in *)sa)->sin_port = port;
 			char ip[255] = { 0 };
 
-			inet_ntop(NRF_AF_INET,
+			inet_ntop(AF_INET,
 				  (void *)&((struct sockaddr_in *)
 				  sa)->sin_addr,
 				  ip,
