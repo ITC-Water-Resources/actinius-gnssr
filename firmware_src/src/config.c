@@ -135,6 +135,8 @@ int read_config(struct config *conf){
 		}
 		
 		if ( conf->webdav.usetls == 1){
+
+
 			cJSON * tlscert=cJSON_GetObjectItemCaseSensitive(webdav,"tlscert");
 
 			if (tlscert == NULL){

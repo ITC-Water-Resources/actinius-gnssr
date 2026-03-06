@@ -926,14 +926,15 @@ int main(void)
 	update_device_status(1);
 
 #ifdef CONFIG_UPLOAD_CLIENT
+#if !defined(CONFIG_SAMPLE_TFM_MBEDTLS)
 	/* register TLS certificate in the modem */
-	if (confdata.webdav.usetls == 1){
+	if (confdata.webdav.usetls == 1 ){
 		if (cert_provision(confdata.webdav.tlscert) != UPLOADCLNT_SUCCESS){
 			led_status=LED_ERROR;
 			return -1;
 		}
 	}
-
+#endif
 #endif
 	LOG_INF("Starting GNSS-R logger application\n");
 

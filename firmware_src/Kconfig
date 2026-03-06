@@ -25,9 +25,18 @@ config UPLOAD_CLIENT
         select NRF_MODEM_LIB
         select HTTP_CLIENT
 
+config SAMPLE_TFM_MBEDTLS
+	bool "Use TF-M and MbedTLS"
+	help
+	  Use TF-M and MbedTLS in this sample instead of using
+	  the offloaded TLS stack in the modem.
+
+
 source "${NRF_BASE}/lib/supl/Kconfig" 
 
 source "subsys/logging/Kconfig.template.log_config"
+
+#source "/opt/ncs/v1.5.1/nrfxlib/Kconfig.nrfxlib"
 
 endmenu
 

@@ -15,6 +15,13 @@ set(PM_STATIC_YML_FILE ${CMAKE_CURRENT_SOURCE_DIR}/pm_static.yml)
 
 set(DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/actinius_icarus.overlay)
 
+
+#uncomment for mbedTLS stack 
+#set(OVERLAY_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/overlay-mbedtls.conf)
+
+#set(ARM_MBEDTLS_PATH $ENV{ZEPHYR_BASE}../mbedtls)
+
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(gnssr_logger)
 

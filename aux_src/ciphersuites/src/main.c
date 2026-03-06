@@ -23,7 +23,7 @@
 
 /* Certificate for `example.com` */
 static const char cert[] = {
-#include "../cert/GeantCA.pem"
+#include "../cert/GEANT_TLS_RSA_1.inc"
 };
 
 BUILD_ASSERT(sizeof(cert) < KB(4), "Certificate too large");
@@ -78,7 +78,7 @@ int cert_provision(void)
 		mismatch = modem_key_mgmt_cmp(TLS_SEC_TAG, MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN, cert,
 					      strlen(cert));
 		if (!mismatch) {
-			printk("Certificate match\n");
+			printk("Certificate match no need to provision\n");
 			return 0;
 		}
 
@@ -202,7 +202,7 @@ void main(void)
 		}
 
 		printk("Connecting to %s... ", HTTPS_HOSTNAME);
-		err = connect(fd, res->ai_addr, sizeof(struct sockaddr_in));
+		err = connect(fd, res->ai_addr, res->ai_addrlen);
 		if (err) {
 			printk("connect() failed, err: %d, %s\n", errno, strerror(errno));
 			ciphersuites[i].supported = false;
