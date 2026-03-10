@@ -29,9 +29,9 @@ enum http_status{
 
 static enum http_status last_http_status=HTTP_404_NOT_FOUND;
 
-static const char fixcert[] = {
-#include "../cert/GEANT_TLS_RSA_1.inc"
-};
+/*static const char fixcert[] = {*/
+/*#include "../cert/GEANT_TLS_RSA_1.inc"*/
+/*};*/
 
 #define MAX_RECV_BUF_LEN 256
 static uint8_t recv_buf_ipv4[MAX_RECV_BUF_LEN];
@@ -67,32 +67,32 @@ static int http_fd;
 /*TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: Yes*/
 
 /*select supported ciphers only*/
-static nrf_sec_cipher_t chosen_ciphersuites [] ={0xC02F,0xC030,0xC027};
+/*static nrf_sec_cipher_t chosen_ciphersuites [] ={0xC02F,0xC030,0xC027};*/
 
-struct lookup_ciphersuite {
-	char *name;
-	uint16_t value;
-	bool supported;
-};
+/*struct lookup_ciphersuite {*/
+	/*char *name;*/
+	/*uint16_t value;*/
+	/*bool supported;*/
+/*};*/
 
-/* Taken from the IANA register */
-static struct lookup_ciphersuite ciphersuites[] = {
-	{ "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384", 0xC024 },
-	{ "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA", 0xC00A },
-	{ "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256", 0xC023 },
-	{ "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA", 0xC009 },
-	{ "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA", 0xC014 },
-	{ "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256", 0xC027 },
-	{ "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA", 0xC013 },
-	{ "TLS_PSK_WITH_AES_256_CBC_SHA", 0x008D },
-	{ "TLS_PSK_WITH_AES_128_CBC_SHA256", 0x00AE },
-	{ "TLS_PSK_WITH_AES_128_CBC_SHA", 0x008C },
-	{ "TLS_PSK_WITH_AES_128_CCM_8", 0xC0A8 },
-	{ "TLS_EMPTY_RENEGOTIATIONINFO_SCSV", 0x00FF },
-	{ "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", 0xC02B },
-	{ "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", 0xC030 },
-	{ "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", 0xC02F },
-};
+/*[> Taken from the IANA register <]*/
+/*static struct lookup_ciphersuite ciphersuites[] = {*/
+	/*{ "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384", 0xC024 },*/
+	/*{ "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA", 0xC00A },*/
+	/*{ "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256", 0xC023 },*/
+	/*{ "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA", 0xC009 },*/
+	/*{ "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA", 0xC014 },*/
+	/*{ "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256", 0xC027 },*/
+	/*{ "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA", 0xC013 },*/
+	/*{ "TLS_PSK_WITH_AES_256_CBC_SHA", 0x008D },*/
+	/*{ "TLS_PSK_WITH_AES_128_CBC_SHA256", 0x00AE },*/
+	/*{ "TLS_PSK_WITH_AES_128_CBC_SHA", 0x008C },*/
+	/*{ "TLS_PSK_WITH_AES_128_CCM_8", 0xC0A8 },*/
+	/*{ "TLS_EMPTY_RENEGOTIATIONINFO_SCSV", 0x00FF },*/
+	/*{ "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", 0xC02B },*/
+	/*{ "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", 0xC030 },*/
+	/*{ "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", 0xC02F },*/
+/*};*/
 
 
 int cert_provision(const char * cacert){

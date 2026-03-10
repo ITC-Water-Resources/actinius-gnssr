@@ -475,18 +475,59 @@ static int gnss_ctrl(uint32_t ctrl)
 		}
 	
 		/*set duty cycling mode */
-		/*nrf_gnss_power_save_mode_t psm=NRF_GNSS_PSM_DUTY_CYCLING_PERFORMANCE;*/
-		nrf_gnss_power_save_mode_t psm=NRF_GNSS_PSM_DUTY_CYCLING_POWER;
-    		nrf_socklen_t psm_len = sizeof(psm);
+		nrf_gnss_power_save_mode_t psm=NRF_GNSS_PSM_DISABLED;
+		switch(confdata.psm_mode){
+			case 0:
+				/*Disable duty cycling most aggresive duty cycling*/
+				psm=NRF_GNSS_PSM_DISABLED;
+				break;
+			case 1:
+				psm=NRF_GNSS_PSM_DUTY_CYCLING_PERFORMANCE;
+				break;
+			case 2:
+				/* most aggresive duty cycling*/
+				psm=NRF_GNSS_PSM_DUTY_CYCLING_POWER;
+				break;
+
+			default:
+				LOG_WRN("Input power saving mode not recognized as 0 (disable), 1 (performance), 2 (ppower), disabling");
+				
+		}
+
 		retval = nrf_setsockopt(gnss_fd,
 					NRF_SOL_GNSS,
 					NRF_SO_GNSS_POWER_SAVE_MODE,
-					&psm,psm_len);
+					&psm,sizeof(psm));
 		if (retval != 0) {
 			LOG_ERR("Failed to set power GNSS duty cycling mode\n");
 			return -1;
 		}
 
+		uint8_t use_case =  NRF_GNSS_USE_CASE_MULTIPLE_HOT_START | NRF_GNSS_USE_CASE_NORMAL_ACCURACY;
+		/*set GNSS use case */
+		switch(confdata.pvt_low){
+			case 0:
+				/*Normal accuracy*/
+				use_case=NRF_GNSS_USE_CASE_MULTIPLE_HOT_START | NRF_GNSS_USE_CASE_NORMAL_ACCURACY;
+				break;
+			case 1:
+				/*Accept low accuracy fixes (more promiscious)*/
+				use_case=NRF_GNSS_USE_CASE_MULTIPLE_HOT_START | NRF_GNSS_USE_CASE_LOW_ACCURACY;
+				break;
+			default:
+				LOG_WRN("pvt_low accuracy request not understood, use 0 (normal), 1 (allow low accuracy fix), setting to normal");
+				
+		}
+		retval = nrf_setsockopt(gnss_fd,
+					NRF_SOL_GNSS,
+					NRF_SO_GNSS_USE_CASE,
+					&use_case,
+					sizeof(use_case));
+
+		if (retval != 0) {
+			LOG_ERR("Failed to set use GNSS case\n");
+			return -1;
+		}
 	}
 
 	if ((ctrl == GNSS_INIT_AND_START) ||
@@ -739,16 +780,14 @@ int process_gnss_data(nrf_gnss_data_frame_t *gnss_data,lz4streamfile * lz4fid)
 
 			/*log_rollover = (fix_counter)%fixes_per_log == 0;*/
 
-			memcpy(&last_pvt,
-			       gnss_data,
-			       sizeof(nrf_gnss_data_frame_t));
 			got_fix = false;
 			led_status=LED_SEARCHING;
 
 			if ((gnss_data->pvt.flags &
 				NRF_GNSS_PVT_FLAG_FIX_VALID_BIT)
 				== NRF_GNSS_PVT_FLAG_FIX_VALID_BIT) {
-
+				/*copy sucessful fix data in last_pvt*/
+				memcpy(&last_pvt, gnss_data, sizeof(nrf_gnss_data_frame_t));
 				got_fix = true;
 				led_status=LED_LOGGING;
 				fix_timestamp = k_uptime_get();

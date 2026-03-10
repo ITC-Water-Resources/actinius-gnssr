@@ -21,6 +21,8 @@ static char jsonbuf[JSONBUFLEN];
 void set_defaults(struct config * conf){
 	strcpy(conf->filebase,"icarus_gnssr0");
 	conf->upload=1;
+	conf->psm_mode=0;
+	conf->pvt_low=1;
 #ifdef CONFIG_UPLOAD_CLIENT
 	strcpy(conf->webdav.host,"httpbin.org");
 	strcpy(conf->webdav.url,"/put");
@@ -90,6 +92,14 @@ int read_config(struct config *conf){
 
 		conf->upload=upload->valueint;
 
+		cJSON *psm_mode= cJSON_GetObjectItemCaseSensitive(monitor, "psm_mode");
+
+		conf->psm_mode=psm_mode->valueint;
+		
+		cJSON *pvt_low= cJSON_GetObjectItemCaseSensitive(monitor, "pvt_low");
+
+		conf->pvt_low=pvt_low->valueint;
+		
 		cJSON * filebase=cJSON_GetObjectItemCaseSensitive(monitor,"filebase");
 
 		strcpy(conf->filebase,filebase->valuestring);
@@ -160,6 +170,8 @@ int read_config(struct config *conf){
 		
 		cJSON * monitor = cJSON_CreateObject();
 		cJSON_AddNumberToObject(monitor,"upload",conf->upload);
+		cJSON_AddNumberToObject(monitor,"psm_mode",conf->psm_mode);
+		cJSON_AddNumberToObject(monitor,"pvt_low",conf->pvt_low);
 		cJSON_AddStringToObject(monitor,"filebase",conf->filebase);
 		
 #ifdef CONFIG_UPLOAD_CLIENT

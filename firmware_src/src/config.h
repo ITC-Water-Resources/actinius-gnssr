@@ -22,6 +22,8 @@ struct webdav_config {
 struct config {
 	char filebase[20];
 	int upload;
+	int psm_mode;
+	int pvt_low;
 #ifdef CONFIG_UPLOAD_CLIENT
 	struct webdav_config webdav;
 #endif
@@ -36,6 +38,8 @@ struct device_status {
 	float longitude;
 	float latitude;
 	float altitude;
+	int psm_mode;
+	int pvt_low;
 	uint16_t battery_mvolt[24];
 
 };
