@@ -44,7 +44,8 @@ for f in files:
         mvolts.append(header['battery_mvolt'][fdate.hour])
 
 
-df=pd.DataFrame(dict(time=timetags,mvolts=mvolts)).set_index('time')
+df=pd.DataFrame(dict(time=timetags,mvolts=mvolts)).drop_duplicates('time').set_index('time')
+
 
 fig, ax = plt.subplots()
 df.plot(ax=ax)
