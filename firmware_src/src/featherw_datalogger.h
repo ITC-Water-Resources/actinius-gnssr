@@ -8,6 +8,8 @@
 
 
 #include <zephyr/fs/fs_interface.h>
+#include <zephyr/fs/fs_interface.h>
+#include <zephyr/fs/fs.h>
 #include <sys/types.h>
 #include <stdbool.h>
 

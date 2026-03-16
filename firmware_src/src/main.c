@@ -28,7 +28,6 @@ LOG_MODULE_REGISTER(GNSSR,CONFIG_GNSSR_LOG_LEVEL);
 
 /*state variabless*/
 static uint64_t                 log_timestamp;
-static struct device_status dev_status;
 
 /* Note: the actual message queue  and semaphore are defined in gnss.c */
 extern struct k_msgq nmea_queue;
@@ -45,8 +44,10 @@ static struct k_poll_event events[2] = {
 					&nmea_queue, 0),
 };
 
-/* config with defaults */
-static struct config confdata;
+/* config with defaults  (instance defined in config.h)*/
+extern struct config confdata;
+
+extern char jsonbuf[JSONBUFLEN];
 
 #ifdef CONFIG_UPLOAD_CLIENT
 void sync_files(){
@@ -66,7 +67,7 @@ void sync_files(){
 		
 		while(lsdir_next(".lz4",&dirp,lz4file) == 0){
 			if(!lte_active){
-				gnss_stop();
+				stop_gnss();
 				lte_connect();
 				lte_active=true;
 			}
@@ -92,7 +93,7 @@ void sync_files(){
 			LOG_INF("Closing LTE link and restarting GNSS\n");
 			lte_disconnect();
 			k_sleep(K_MSEC(1000));
-			gnss_start();
+			start_gnss();
 			k_sleep(K_MSEC(1000));
 		}
 
@@ -131,6 +132,10 @@ int rollover_lz4log(lz4streamfile * lz4fid){
 	
 		return -1;
 	}
+	///Write JSON header with the device status
+	get_jsonstatus(jsonbuf,JSONBUFLEN);
+	lz4write(lz4fid,jsonbuf);
+	
 	log_timestamp=k_uptime_get();
 
 	return 0;
@@ -143,6 +148,11 @@ int rollover_lz4log(lz4streamfile * lz4fid){
 
 int main(void)
 {
+
+#ifdef CONFIG_ADC
+	init_adc();
+	LOG_INF("Initializing battery voltage monitoring\n");
+#endif
 	set_led_status(LED_SEARCHING);
 
 	/* NOTE leds and button event are intialized in a separate thread */
@@ -175,12 +185,7 @@ int main(void)
 
 
 	/*initialize device status*/
-	strcpy(dev_status.device_id,confdata.filebase);
-	dev_status.uptime=k_uptime_get()/(MSEC_PER_SEC*3600.0);
-	dev_status.longitude=0.0;
-	dev_status.height=0.0;
-	dev_status.latitude=0.0;
-	dev_status.batvoltage=-1.0;
+	init_device_status();
 
 #ifdef CONFIG_UPLOAD_CLIENT
 	/* register TLS certificate in the modem */

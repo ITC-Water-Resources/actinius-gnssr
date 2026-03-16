@@ -8,6 +8,7 @@
 #include "led_buttons.h"
 #include <zephyr/kernel.h>
 #include "modem.h"
+#include "config.h"
 #include <nrf_modem_gnss.h>
 #include <stdio.h>
 #include <zephyr/logging/log.h>
@@ -28,6 +29,7 @@ static int agps=0;
 static struct nrf_modem_gnss_agps_data_frame last_agps;
 #endif
 
+extern struct config confdata;
 extern struct k_sem rollover_event_sem;
 K_MSGQ_DEFINE(nmea_queue, sizeof(struct nrf_modem_gnss_nmea_data_frame *), 10, 4);
 
@@ -111,6 +113,7 @@ static void gnss_event_handler(int event)
 
 		if(pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID){
 			gnss_fixed+=1;
+			update_device_status(&pvt_data);
 			set_led_status(LED_LOGGING);
 		}else{
 			gnss_fixed=0;
@@ -130,8 +133,8 @@ static void gnss_event_handler(int event)
 		if(pvt_data.datetime.day != last_day){
 			k_sem_give(&rollover_event_sem);
 
+			last_day=pvt_data.datetime.day;
 		}
-		last_day=pvt_data.datetime.day;
 
 		
 		break;
@@ -270,6 +273,13 @@ int init_gnss(int useagps)
 
 	/* This use case flag should always be set. */
 	uint8_t use_case = NRF_MODEM_GNSS_USE_CASE_MULTIPLE_HOT_START;
+	/*set GNSS use case */
+	if (confdata.pvt_low == 1){
+		use_case=NRF_MODEM_GNSS_USE_CASE_MULTIPLE_HOT_START | NRF_MODEM_GNSS_USE_CASE_LOW_ACCURACY;
+		LOG_INF("Setting GNSS to low accuracy mode\n");
+	}
+
+
 	retval=nrf_modem_gnss_use_case_set(use_case); 
 	
 	if (retval !=0)
@@ -278,6 +288,28 @@ int init_gnss(int useagps)
 		return retval;
 	}
 
+	/*power mode setting*/
+
+	uint8_t psm=NRF_MODEM_GNSS_PSM_DISABLED;
+	switch(confdata.psm_mode){
+		case 1:
+			psm=NRF_MODEM_GNSS_PSM_DUTY_CYCLING_PERFORMANCE;
+			LOG_INF("setting gnss power mode to *Performance*\n");
+			break;
+		case 2:
+			/* most aggresive duty cycling*/
+			psm=NRF_MODEM_GNSS_PSM_DUTY_CYCLING_POWER;
+			LOG_INF("setting gnss power mode to *Power*\n");
+			break;
+
+	}
+	retval=nrf_modem_gnss_power_mode_set(psm);
+
+	if (retval !=0)
+	{
+		LOG_ERR("cannot set GNSS power more");
+		return retval;
+	}
 #ifdef CONFIG_SUPL_CLIENT_LIB
 	if( agps){
 		LOG_INF("Initializing SUPL library\n");
@@ -309,16 +341,6 @@ int32_t start_gnss(void){
 	return retval;
 }
 
-
-/*void print_logging(void){*/
-
-	/*printk("\033[1;1H");*/
-	/*printk("\033[2J");*/
-	/*printk("Seconds since last log rollover: %lld\n",*/
-			       /*(k_uptime_get() - log_timestamp) / 1000);*/
-
-	/*printk("Logging [%c]\n",update_indicator[(++cnt)%4]);*/
-/*}*/
 
 
 

@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stdint.h>
 
 #define LED_ERROR 0
 #define LED_SEARCHING  1
@@ -11,3 +12,5 @@ void set_led_status(int status);
 int get_led_status(void);
 
 
+bool init_adc(void);
+int get_battery_voltage(uint16_t *battery_voltage);

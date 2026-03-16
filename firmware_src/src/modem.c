@@ -44,8 +44,8 @@ int lte_connect(void)
 	int err;
 
 	LOG_INF("Connecting to LTE network");
-	err = lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_LTE);
-	/*err = lte_lc_connect_async(lte_lc_event_handler);*/
+	/*err = lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_LTE);*/
+	err = lte_lc_connect_async(lte_lc_event_handler);
 	if (err) {
 		LOG_ERR("Failed to activate LTE, error: %d", err);
 		return -1;
@@ -96,23 +96,32 @@ int enable_gnss_mode(void){
 
 int setup_modem(void)
 {
-	/*if(lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_GPS, LTE_LC_SYSTEM_MODE_PREFER_AUTO) != 0){*/
-		/*LOG_ERR("Failed to set modem system mode");*/
-		/*return -1;*/
-	/*}*/
 	
+#ifdef CONFIG_UPLOAD_CLIENT
+
+	if(lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_LTEM_GPS, LTE_LC_SYSTEM_MODE_PREFER_AUTO) != 0){
+		LOG_ERR("Failed to set GPS+LTE-M modem system mode");
+		return -1;
+	}
+#else	
+
+	if(lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_GPS, LTE_LC_SYSTEM_MODE_PREFER_AUTO) != 0){
+		LOG_ERR("Failed to set GPS modem system mode");
+		return -1;
+	}
+#endif	
 	/*int err = nrf_modem_lib_init(NORMAL_MODE);*/
 	/*if (err) {*/
 		/*LOG_ERR("Modem library initialization failed, error: %d", err);*/
 		/*return err;*/
 	/*}*/
 
-	if (lte_lc_init() != 0) {
-		LOG_ERR("Failed to initialize LTE link controller");
-		return -1;
-	}
+	/*if (lte_lc_init() != 0) {*/
+		/*LOG_ERR("Failed to initialize LTE link controller");*/
+		/*return -1;*/
+	/*}*/
 	
-	lte_lc_register_handler(lte_lc_event_handler);
+	/*lte_lc_register_handler(lte_lc_event_handler);*/
 
 	/* set the modem to normal mode and then optionally directly to flight mode with UICC on*/
 	/*if(lte_lc_func_mode_set(LTE_LC_FUNC_MODE_NORMAL) != 0){*/
@@ -144,7 +153,7 @@ void print_boardinfo(){
 	LOG_INF("GNSS-R_version: %s",CONFIG_GNSSR_VERSION);
 #endif
 
-	char modeminfostring [32];
+	char modeminfostring [33];
 	if(modem_info_init() != 0){
 		LOG_ERR("error initializing modem info");
 		return;
@@ -158,24 +167,23 @@ void print_boardinfo(){
 	LOG_INF("modem firmware: %s",modeminfostring);
 	
 	/*Retrieving the CCID requires UICC to be turned on (but can be ion flight mode) */
-	
-	/*if(lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_UICC) == 0){*/
-		/*if(modem_info_string_get(MODEM_INFO_ICCID, modeminfostring,sizeof(modeminfostring))< 0){*/
-			/*LOG_ERR("cannot retrieve (e)SIM ICCID");*/
+	if(lte_lc_func_mode_set(LTE_LC_FUNC_MODE_ACTIVATE_UICC) == 0){
+		if(modem_info_string_get(MODEM_INFO_ICCID, modeminfostring,sizeof(modeminfostring))< 0){
+			LOG_ERR("cannot retrieve (e)SIM ICCID");
 		
-		/*}*/
-		/*LOG_INF("(e)SIM ICCID: %s",modeminfostring);*/
-	
-		/*if(lte_lc_func_mode_set(LTE_LC_FUNC_MODE_OFFLINE) == 0){*/
-			/*LOG_ERR("cannot deactivate UICC");*/
-		/*}*/
+		}
+		LOG_INF("(e)SIM ICCID: %s",modeminfostring);
+			
+		if(lte_lc_func_mode_set(LTE_LC_FUNC_MODE_OFFLINE_UICC_ON) == 0){
+			LOG_ERR("Cannot set modem offline");
+		}
 
 
 
-	/*}else{*/
-		/*LOG_ERR("Cannot set activate UUIC");*/
+	}else{
+		LOG_ERR("Cannot set activate UUIC");
 
-	/*}*/
+	}
 
 	if(modem_info_string_get(MODEM_INFO_IMEI, modeminfostring,sizeof(modeminfostring))< 0){
 		LOG_ERR("cannot retrieve module IMEI");
@@ -193,9 +201,6 @@ void print_boardinfo(){
 	}else{
 
 		switch (sysmode) {
-		case LTE_LC_SYSTEM_MODE_NONE:
-			LOG_INF("LTE_LC_SYSTEM_MODE_NONE");
-			break;
 		case LTE_LC_SYSTEM_MODE_LTEM:
 			LOG_INF("LTE_LC_SYSTEM_MODE_LTEM");
 			break;
@@ -222,26 +227,6 @@ void print_boardinfo(){
 			break;
 		}
 	}
-	/*enum lte_lc_func_mode funcmode;*/
-
-	/*if (lte_lc_func_mode_get(&funcmode) != 0){*/
-	
-		/*LOG_ERR("cannot retrieve modem functional mode");*/
-
-	/*}else{*/
-
-		/*switch (funcmode) {*/
-		/*case LTE_LC_FUNC_MODE_POWER_OFF:*/
-			/*LOG_INF("LTE_LC_FUNC_MODE_POWER_OFF");*/
-			/*break;*/
-		/*case LTE_LC_FUNC_MODE_NORMAL:*/
-			/*LOG_INF("LTE_LC_FUNC_MODE_NORMAL");*/
-			/*break;*/
-		/*default:*/
-			/*LOG_INF("Unspecified functional mode %d",sysmode);*/
-			/*break;*/
-	/*}*/
-	/*}*/
 	LOG_INF("---end board info---\n\n");
 		
 

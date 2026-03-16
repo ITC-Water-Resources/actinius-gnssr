@@ -13,6 +13,9 @@ set(DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/actinius_icarus.overlay)
 #uncomment the following to use the external sim
   #set(DTC_OVERLAY_FILE ${CMAKE_CURRENT_SOURCE_DIR}/boards/actinius_use_externalsim.overlay)
 
+  #list(APPEND mcuboot_OVERLAY_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/mcuboot_overlay-rsa.conf")
+
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(gnssr_logger)
 

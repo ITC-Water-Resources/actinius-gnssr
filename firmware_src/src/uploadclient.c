@@ -7,12 +7,22 @@
 #include "uploadclient.h"
 #include <string.h>
 #include <nrf_socket.h>
-#include <net/socket.h>
-#include <net/tls_credentials.h>
-#include <net/http_client.h>
-#include <logging/log.h>
-#include <fs/fs.h>
+#include <zephyr/net/socket.h>
+/*#include <net/tls_credentials.h>*/
+#if defined(CONFIG_POSIX_API)
+#include <zephyr/posix/arpa/inet.h>
+#include <zephyr/posix/netdb.h>
+#include <zephyr/posix/unistd.h>
+#include <zephyr/posix/sys/socket.h>
+#endif
+
+
+
+#include <zephyr/net/http/client.h>
+#include <zephyr/logging/log.h>
+#include <zephyr/fs/fs.h>
 #include <stdio.h>
+#include <modem/modem_key_mgmt.h>
 #include "featherw_datalogger.h"
 
 LOG_MODULE_DECLARE(GNSSR,CONFIG_GNSSR_LOG_LEVEL);
@@ -28,9 +38,9 @@ enum http_status{
 
 static enum http_status last_http_status=HTTP_404_NOT_FOUND;
 
-static const char certfx[] = {
-#include "../cert/GeantCA.pem"
-};
+/*static const char fixcert[] = {*/
+/*#include "../cert/GEANT_TLS_RSA_1.inc"*/
+/*};*/
 
 #define MAX_RECV_BUF_LEN 256
 static uint8_t recv_buf_ipv4[MAX_RECV_BUF_LEN];
@@ -38,10 +48,44 @@ static uint8_t recv_buf_ipv4[MAX_RECV_BUF_LEN];
 #define UPLOAD_BUF_LEN 512
 static uint8_t upload_buffer[UPLOAD_BUF_LEN];
 
+/* Number of getaddrinfo attempts */
+#define GAI_ATTEMPT_COUNT  4
 
-static nrf_sec_cipher_t ciphersuites_list [] ={0xC02B,0xC030, 0xC02F, 0xC024, 0xC00A, 0xC023, 0xC009, 0xC014, 0xC027, 0xC013,0x008D,0x00AE,0x008C,0xC0A8,0x00FF};
+/* socket identifier*/
+static int http_fd;
 
-/*static uint16_t ciphersuites[] = {*/
+
+
+/*static nrf_sec_cipher_t ciphersuites_list [] ={0xC027,0xC02B,0xC030, 0xC02F, 0xC024, 0xC00A, 0xC023, 0xC009, 0xC014, 0xC013,0x008D,0x00AE,0x008C,0xC0A8,0x00FF};*/
+
+/*ciphersuite support summary for host `surfdrive.surf.nl`:*/
+/*TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384: No*/
+/*TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA: No*/
+/*TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256: No*/
+/*TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA: No*/
+/*TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA: No*/
+/*TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256: Yes*/
+/*TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA: No*/
+/*TLS_PSK_WITH_AES_256_CBC_SHA: No*/
+/*TLS_PSK_WITH_AES_128_CBC_SHA256: No*/
+/*TLS_PSK_WITH_AES_128_CBC_SHA: No*/
+/*TLS_PSK_WITH_AES_128_CCM_8: No*/
+/*TLS_EMPTY_RENEGOTIATIONINFO_SCSV: No*/
+/*TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256: No*/
+/*TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384: Yes*/
+/*TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: Yes*/
+
+/*select supported ciphers only*/
+/*static nrf_sec_cipher_t chosen_ciphersuites [] ={0xC02F,0xC030,0xC027};*/
+
+/*struct lookup_ciphersuite {*/
+	/*char *name;*/
+	/*uint16_t value;*/
+	/*bool supported;*/
+/*};*/
+
+/*[> Taken from the IANA register <]*/
+/*static struct lookup_ciphersuite ciphersuites[] = {*/
 	/*{ "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384", 0xC024 },*/
 	/*{ "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA", 0xC00A },*/
 	/*{ "TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256", 0xC023 },*/
@@ -54,34 +98,58 @@ static nrf_sec_cipher_t ciphersuites_list [] ={0xC02B,0xC030, 0xC02F, 0xC024, 0x
 	/*{ "TLS_PSK_WITH_AES_128_CBC_SHA", 0x008C },*/
 	/*{ "TLS_PSK_WITH_AES_128_CCM_8", 0xC0A8 },*/
 	/*{ "TLS_EMPTY_RENEGOTIATIONINFO_SCSV", 0x00FF },*/
-/*#if defined(CONFIG_EXTENDED_CIPHERSUITE_LIST)*/
 	/*{ "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256", 0xC02B },*/
 	/*{ "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384", 0xC030 },*/
 	/*{ "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256", 0xC02F },*/
-/*#endif*/
 /*};*/
 
-/* Provision certificate to modem */
-int cert_provision(const char *cacert)
-{
-	
-	if ( IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS)){
-		LOG_INF("Registering TLS certificate in the modem\n");
-		size_t calen=strlen(certfx);
-		/*size_t calen=strlen(cacert);*/
 
-		int ret = tls_credential_add(TLS_SEC_TAG,
-						 TLS_CREDENTIAL_CA_CERTIFICATE,
-						 certfx,
-						 calen);
-		if (ret < 0) {
-			LOG_ERR("Failed to register public certificate: %d",ret);
-				return UPLOADCLNT_ERROR;
+int cert_provision(const char * cacert){
+	/* modified from ciphersuites sample*/
+
+	int err;
+	bool exists;
+	int mismatch;
+	
+	err = modem_key_mgmt_exists(TLS_SEC_TAG,
+				    MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN,
+				    &exists);
+	if (err) {
+		LOG_ERR("Failed to check for certificates err %d\n", err);
+		return err;
+	}
+
+	if (exists) {
+		/* For the sake of simplicity we delete what is provisioned
+		 * with our security tag and reprovision our certificate.
+		 */
+		mismatch = modem_key_mgmt_cmp(TLS_SEC_TAG, MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN, cacert,
+					      strlen(cacert));
+		if (!mismatch) {
+			printk("Certificate match no need to re-provision\n");
+			return 0;
+		}
+
+		err = modem_key_mgmt_delete(TLS_SEC_TAG,
+					    MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN);
+		if (err) {
+			LOG_ERR("Failed to delete existing certificate, err %d\n",
+			       err);
 		}
 	}
-	return UPLOADCLNT_SUCCESS;
 
+	LOG_INF("Provisioning CA certificate to modem\n");
+
+	err = modem_key_mgmt_write(TLS_SEC_TAG, MODEM_KEY_MGMT_CRED_TYPE_CA_CHAIN,
+				   cacert, strlen(cacert));
+	if (err) {
+		LOG_ERR("Failed to provision certificate, err %d\n", err);
+		return err;
+	}
+
+	return UPLOADCLNT_SUCCESS;
 }
+
 
 
 /* function is needed to keep pushing data in a socket as the send call may only do thi partially*/
@@ -102,51 +170,166 @@ static ssize_t sendall(int sock, const void *buf, size_t len)
 }
 
 
-
-
-/* Number of getaddrinfo attempts */
-#define GAI_ATTEMPT_COUNT  3
-
-static int http_fd;
-
-int tls_setup(int fd, const char * hostname)
+/* Setup TLS options on a given socket */
+int tls_setup(int fd,const char * hostname,const char * cert)
 {
 	int err;
 	int verify;
 
 	/* Security tag that we have provisioned the certificate with */
-	const sec_tag_t tls_sec_tag[] = {
+	const nrf_sec_tag_t tls_sec_tag[] = {
 		TLS_SEC_TAG,
 	};
 
+	LOG_INF("Setup TLS options\n");
+
+
+
 	/* Set up TLS peer verification */
+
+
 	verify = TLS_PEER_VERIFY_REQUIRED;
 
 	err = setsockopt(fd, SOL_TLS, TLS_PEER_VERIFY, &verify, sizeof(verify));
 	if (err) {
-		printk("Failed to setup peer verification, err %d, %s\n", errno, strerror(errno));
+		printk("Failed to setup peer verification, err %d\n", errno);
 		return err;
 	}
 
 	/* Associate the socket with the security tag
 	 * we have provisioned the certificate with.
 	 */
-	err = setsockopt(fd, SOL_TLS, TLS_SEC_TAG_LIST, tls_sec_tag, sizeof(tls_sec_tag));
+	err = setsockopt(fd, SOL_TLS, TLS_SEC_TAG_LIST, tls_sec_tag,
+			 sizeof(tls_sec_tag));
 	if (err) {
-		printk("Failed to setup TLS sec tag, err %d, %s\n", errno, strerror(errno));
+		printk("Failed to setup TLS sec tag, err %d\n", errno);
 		return err;
 	}
+	
 
 	err = setsockopt(fd, SOL_TLS, TLS_HOSTNAME, hostname, strlen(hostname));
 	if (err) {
-		printk("Failed to setup TLS hostname, err %d, %s\n", errno, strerror(errno));
+		LOG_ERR("Failed to setup TLS hostname, err %d, %s\n", errno, strerror(errno));
 		return err;
 	}
+
+	
+	/*err = setsockopt(fd, SOL_TLS, TLS_CIPHERSUITE_LIST, chosen_ciphersuites,sizeof(chosen_ciphersuites));*/
+	/*if (err ) {*/
+		/*LOG_ERR("Failed to set TLS ciphersuites (%d)", errno);*/
+		/*err = -errno;*/
+		/*return err;*/
+	/*}*/
+
 	return 0;
 }
 
+/* Setup TLS options on a given socket */
+/*int tls_setup(int fd,const char * hostname)*/
+/*{*/
+	/*int err;*/
+	/*int verify;*/
 
-int open_http_socket(const char * hostname,int usetls)
+	/*[> Security tag that we have provisioned the certificate with <]*/
+	/*const nrf_sec_tag_t tls_sec_tag[] = {*/
+		/*TLS_SEC_TAG,*/
+	/*};*/
+
+	/*[> Set up TLS peer verification <]*/
+	/*enum {*/
+		/*NONE = 0,*/
+		/*OPTIONAL = 1,*/
+		/*REQUIRED = 2,*/
+	/*};*/
+
+	/*verify = REQUIRED;*/
+
+	/*err = nrf_setsockopt(fd, NRF_SOL_SECURE, NRF_SO_SEC_PEER_VERIFY, &verify, sizeof(verify));*/
+	/*if (err) {*/
+		/*LOG_ERR("Failed to setup peer verification, err %s\n", strerror(errno));*/
+		/*return err;*/
+	/*}*/
+
+	/* Associate the socket with the security tag
+	 * we have provisioned the certificate with.
+	 */
+	/*err = nrf_setsockopt(fd, NRF_SOL_SECURE, NRF_SO_SEC_TAG_LIST, tls_sec_tag,*/
+			 /*sizeof(tls_sec_tag));*/
+	/*if (err) {*/
+		/*LOG_ERR("Failed to setup TLS sec tag, err %s\n", strerror(errno));*/
+		/*return err;*/
+	/*}*/
+
+	/*err = nrf_setsockopt(http_fd, NRF_SOL_SECURE, NRF_SO_CIPHERSUITE_LIST, ciphersuites_list,*/
+				 /*sizeof(ciphersuites_list));*/
+	/*if (err < 0) {*/
+		/*LOG_ERR("Failed to set TLS ciphersuites (%d)", -errno);*/
+		/*err = -errno;*/
+	/*}*/
+	
+	/*err = nrf_setsockopt(fd, NRF_SOL_SECURE, NRF_SO_HOSTNAME, hostname, strlen(hostname));*/
+	/*if (err) {*/
+		/*LOG_ERR("Failed to setup TLS hostname, err %d, %s\n", errno, strerror(errno));*/
+		/*return err;*/
+	/*}*/
+	/*return 0;*/
+/*}*/
+
+
+
+/*int tls_setup(int fd, const char * hostname)*/
+/*{*/
+	/*int err;*/
+	/*int verify;*/
+
+	/*[> Security tag that we have provisioned the certificate with <]*/
+	/*const sec_tag_t tls_sec_tag[] = {*/
+		/*TLS_SEC_TAG,*/
+	/*};*/
+
+	/*[> Set up TLS peer verification <]*/
+	/*verify = TLS_PEER_VERIFY_REQUIRED;*/
+
+	/*err = setsockopt(fd, SOL_TLS, TLS_PEER_VERIFY, &verify, sizeof(verify));*/
+	/*if (err) {*/
+		/*printk("Failed to setup peer verification, err %d, %s\n", errno, strerror(errno));*/
+		/*return err;*/
+	/*}*/
+
+	/* Associate the socket with the security tag
+	 * we have provisioned the certificate with.
+	 */
+	/*err = setsockopt(fd, SOL_TLS, TLS_SEC_TAG_LIST, tls_sec_tag, sizeof(tls_sec_tag));*/
+	/*if (err) {*/
+		/*printk("Failed to setup TLS sec tag, err %d, %s\n", errno, strerror(errno));*/
+		/*return err;*/
+	/*}*/
+
+	/*err = setsockopt(fd, SOL_TLS, TLS_HOSTNAME, hostname, strlen(hostname));*/
+	/*if (err) {*/
+		/*printk("Failed to setup TLS hostname, err %d, %s\n", errno, strerror(errno));*/
+		/*return err;*/
+	/*}*/
+	/*return 0;*/
+/*}*/
+
+int close_http_socket(void)
+{
+	if ( http_fd == -1){
+	/* nothing to close*/
+		return UPLOADCLNT_SUCCESS;
+	}
+
+	if (close(http_fd) < 0) {
+		LOG_ERR("Failed to close HTTP(S) socket\n");
+		return UPLOADCLNT_ERROR;
+	}
+	http_fd=-1;
+	return UPLOADCLNT_SUCCESS;
+
+}
+
+int open_http_socket(const char * hostname,int usetls,const char *cert)
 {
 	int err = UPLOADCLNT_ERROR;
 	int proto;
@@ -154,24 +337,23 @@ int open_http_socket(const char * hostname,int usetls)
 	uint16_t port;
 	struct addrinfo *addr;
 	struct addrinfo *info;
-
+	http_fd=-1;
 	
-	if (usetls && IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS)) {
+	if (usetls) {
 		proto = IPPROTO_TLS_1_2;
 		port = htons(HTTPS_PORT);
+		/*proto = NRF_SPROTO_TLS1v2;*/
+		/*port = nrf_htons(HTTPS_PORT);*/
 	}else{
 		proto = IPPROTO_TCP;
+		/*proto = NRF_IPPROTO_TCP;*/
 		port = htons(HTTP_PORT);
+		/*port = nrf_htons(HTTP_PORT);*/
 	}
 
 	struct addrinfo hints = {
 		.ai_family = AF_INET,
 		.ai_socktype = SOCK_STREAM,
-		.ai_protocol = proto,
-		/* Either a valid,
-		 * NULL-terminated access point name or NULL.
-		 */
-		.ai_canonname = NULL,
 	};
 
 	/* Try getaddrinfo many times, sleep a bit between retries */
@@ -185,134 +367,136 @@ int open_http_socket(const char * hostname,int usetls)
 				k_sleep(K_MSEC(1000 * gai_cnt));
 			} else {
 				/* Return if no success after many retries */
-				LOG_ERR("Failed to resolve hostname %s on IPv4, errno: %d)\n",
-					log_strdup(hostname), errno);
+				LOG_ERR("Failed to resolve hostname %s on IPv4/IPv6, %s)\n",
+					hostname, strerror(errno));
 
+				if (info){
+					freeaddrinfo(info);
+				}
 				return UPLOADCLNT_ERROR;
 			}
 		}
 	} while (err);
 
-	/* Create socket */
-	http_fd = socket(AF_INET, SOCK_STREAM, proto);
-	if (http_fd < 0) {
-		LOG_ERR("Failed to create socket, errno %d\n", errno);
-		goto cleanup;
-	}
-
-	struct timeval timeout = {
-		.tv_sec = 1,
-		.tv_usec = 0,
-	};
-
-	err = setsockopt(http_fd,
-			 NRF_SOL_SOCKET,
-			 NRF_SO_RCVTIMEO,
-			 &timeout,
-			 sizeof(timeout));
-	if (err) {
-		LOG_ERR("Failed to setup socket timeout, errno %d\n", errno);
-		err=-errno;
-		return err;
-	}
-
-	if(usetls && IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS)){
-		sec_tag_t sec_tag_list[] = {
-			TLS_SEC_TAG,
-		};
-
-	
-		err = setsockopt(http_fd, SOL_TLS, TLS_SEC_TAG_LIST,
-				 sec_tag_list, sizeof(sec_tag_list));
-		if (err < 0) {
-			LOG_ERR("Failed to set TLS secure option (%d)", -errno);
-			err = -errno;
-			return err;
-		}
-
-		err = setsockopt(http_fd, SOL_TLS, TLS_HOSTNAME,
-				 hostname,
-				 strlen(hostname));
-		if (err < 0) {
-			LOG_ERR("Failed to set TLS_HOSTNAME "
-				"option (%d)", -errno);
-			err = -errno;
-			return err;
-		}
-	}
-	
-	/* Not connected */
-	err = UPLOADCLNT_ERROR;
-
+	err=UPLOADCLNT_ERROR;
+	//try all resolved adresses (use first successfull one)
 	for (addr = info; addr != NULL; addr = addr->ai_next) {
 		struct sockaddr *const sa = addr->ai_addr;
+		char ip[INET6_ADDRSTRLEN] ={0};
 
-		switch (sa->sa_family) {
-		case AF_INET6:
-			((struct sockaddr_in6 *)sa)->sin6_port = port;
-			LOG_INF("ipv6 found\n");
-			break;
+		switch(sa->sa_family) {
 		case AF_INET:
-			((struct sockaddr_in *)sa)->sin_port = port;
-			char ip[255] = { 0 };
-
-			inet_ntop(NRF_AF_INET,
-				  (void *)&((struct sockaddr_in *)
-				  sa)->sin_addr,
-				  ip,
-				  255);
-			LOG_INF("ipv4 %s (%x) port %d\n",
-				log_strdup(ip),
-				((struct sockaddr_in *)sa)->sin_addr.s_addr,
-				ntohs(port));
+			inet_ntop(AF_INET, &(((struct sockaddr_in *)sa)->sin_addr),ip, INET6_ADDRSTRLEN);
+			LOG_INF("Trying IPV4: %s\n",ip);
+			/* set the port to connect to*/
+			((struct sockaddr_in *)addr->ai_addr)->sin_port = port;
 			break;
-		}
 
+		case AF_INET6:
+			inet_ntop(AF_INET6, &(((struct sockaddr_in6 *)sa)->sin6_addr),ip, INET6_ADDRSTRLEN);
+			LOG_INF("Trying IPV6 : %s\n",ip);
+			((struct sockaddr_in6 *)addr->ai_addr)->sin6_port = port;
+			/* Try to create a new socket  */
+			break;
 
-		err = setsockopt(http_fd, SOL_TLS, TLS_CIPHERSUITE_LIST, ciphersuites_list,
-				 sizeof(ciphersuites_list));
-		if (err < 0) {
-			LOG_ERR("Failed to set TLS ciphersuites (%d)", -errno);
-			err = -errno;
+		default:
+			strcpy(ip, "Unknown AF\n");
+			LOG_INF("Unknown IPv4/ipv6 address resolution\n");
 			continue;
+
 		}
+		/*int used_ciphersuite[] = { 0 };*/
+		/*int nstop=1;*/
 		
 
+		/*if(usetls && IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS)){*/
+			/*nstop=ARRAY_SIZE(ciphersuites);*/
+		/*}*/
+		/*for (int i = 0; i < nstop; i++) {*/
+		/*if (IS_ENABLED(CONFIG_SAMPLE_TFM_MBEDTLS)) {*/
+			/*http_fd = socket(AF_INET, SOCK_STREAM | SOCK_TLS_NATIVE, proto);*/
+		/*} else {*/
+			/*http_fd = socket(AF_INET, SOCK_STREAM, proto);*/
+		/*}*/
+		http_fd = socket(sa->sa_family, SOCK_STREAM, proto);
+		
+		/*LOG_INF("try connecting to %s, port %d\n", log_strdup(ip), ntohs(port));*/
 
-		err = connect(http_fd, sa, addr->ai_addrlen);
+
+		if (http_fd < 0) {
+			LOG_ERR("Failed to create socket, http_fd %d. Trying next\n", http_fd);
+			http_fd=-1;
+			close(http_fd); //socket needs to be closed before retrying
+			continue;
+		}
+
+		/* setup socket timeout options*/
+		struct timeval timeout = {
+			.tv_sec = 1,
+			.tv_usec = 0,
+		};
+
+		err = setsockopt(http_fd,
+				SOL_SOCKET,
+			 SO_RCVTIMEO,
+			 &timeout,
+			 sizeof(timeout));
+		
+		if (err) {
+			LOG_ERR("Failed to setup socket timeout, trying with next errno %d\n", errno);
+			err=-err;
+			close_http_socket(); //socket needs to be closed before retrying
+			continue;
+		}
+
+		if(usetls ){
+
+			/*used_ciphersuite[0] = ciphersuites[i].value;*/
+
+			err=tls_setup(http_fd,hostname,cert);
+			if (err) {
+				LOG_ERR("Failed to apply TLS socket options, retrying errno %s\n", strerror(err));
+				close_http_socket(); //socket needs to be closed before retrying
+				continue;
+			}
+		}
+	
+		
+		//try connecting
+		
+		err = connect(http_fd, addr->ai_addr, addr->ai_addrlen);
+		LOG_INF("Connecting to %s\n",ip);
 		if (err) {
 			/* Try next address */
-			LOG_ERR("Unable to connect, errno %d\n", errno);
+			LOG_ERR("Unable to connect, %d, %s\n", errno,strerror(errno));
+			close_http_socket(); //socket may need to be closed before retrying
 			err=-errno;
+			continue;
 		} else {
 			/* Successfully Connected! */
-			return UPLOADCLNT_SUCCESS;
+			err=UPLOADCLNT_SUCCESS;
+			break;
 		}
+		/*}*/
 	}
-	return err;
+	
 
-cleanup:
+
+
+	if (err != UPLOADCLNT_SUCCESS){
+		close_http_socket();
+
+		
+	}
+	/* free up aaddrinfo structure regardless of outcome*/
 	freeaddrinfo(info);
 
-	if (err) {
-		/* Unable to connect, close socket */
-		close(http_fd);
-		http_fd = -1;
-	}
-
-	return UPLOADCLNT_ERROR;
-}
-
-int close_http_socket(void)
-{
-	if (close(http_fd) < 0) {
-		LOG_ERR("Failed to close HTTP(S) socket\n");
-		return UPLOADCLNT_ERROR;
-	}
-	http_fd=-1;
-	return UPLOADCLNT_SUCCESS;
+	return err;
 
 }
+
+
+
 
 
 static int upload_cb(int sock, struct http_request *req, void *user_data)
@@ -324,11 +508,11 @@ static int upload_cb(int sock, struct http_request *req, void *user_data)
 	struct fs_file_t fid;
 	ssize_t retc;
 	ssize_t nsend=0;
-	LOG_INF("Uploading file %s\n",log_strdup(filename));
+	LOG_INF("Uploading file %s\n",filename);
 	/* filecontent is loaded in upload_buffer at position CHUNK_SHIFT*/
 	/* open file for reading */
 	if ( fs_open(&fid,filename,FS_O_READ)!=0){
-		LOG_ERR("cannot open file %s for reading",log_strdup(filename));
+		LOG_ERR("cannot open file %s for reading",filename);
 		return UPLOADCLNT_ERROR;
 	}
 	
@@ -381,7 +565,7 @@ static void response_cb(struct http_response *rsp,
 		last_http_status=HTTP_201_CREATED;
 	}
 
-	LOG_INF("Response status %s\n", log_strdup(rsp->http_status));	
+	LOG_INF("Response status %s\n", rsp->http_status);	
 
 	printk("%s\n",rsp->recv_buf);
 }
@@ -393,7 +577,7 @@ int webdavUploadFile(const char * filename,const struct config * conf){
 
 
 	if( filesize == 0){
-		LOG_ERR("Not uploading %s, zero size or not existent",log_strdup(filename));
+		LOG_ERR("Not uploading %s, zero size or not existent",filename);
 		return UPLOADCLNT_ERROR;
 	}
 
@@ -404,7 +588,7 @@ int webdavUploadFile(const char * filename,const struct config * conf){
 	
 	/*printk("%s\n",contentlenstr);*/
 	
-	if (open_http_socket(conf->webdav.host,conf->webdav.usetls) != UPLOADCLNT_SUCCESS){
+	if (open_http_socket(conf->webdav.host,conf->webdav.usetls,conf->webdav.tlscert) != UPLOADCLNT_SUCCESS){
 		LOG_ERR("Cannot open http(s) socket");
 		return UPLOADCLNT_ERROR;
 	}

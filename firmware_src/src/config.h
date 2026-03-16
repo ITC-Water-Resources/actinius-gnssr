@@ -1,10 +1,16 @@
 
+#include <nrf_modem_gnss.h>
+
+
+
 #define CONF_SUCCESS 0
 
 #define CONF_ERR 1
 
 #ifndef CONFIG_H
 #define CONFIG_H
+
+#define JSONBUFLEN 3000
 
 #ifdef CONFIG_UPLOAD_CLIENT
 struct webdav_config {
@@ -22,6 +28,8 @@ struct config {
 	char filebase[20];
 	int agps;
 	int upload;
+	int psm_mode;
+	int pvt_low;
 #ifdef CONFIG_UPLOAD_CLIENT
 	struct webdav_config webdav;
 #endif
@@ -35,10 +43,15 @@ struct device_status {
 	float uptime;
 	float longitude;
 	float latitude;
-	float height;
-	float batvoltage;
+	float altitude;
+	uint16_t battery_mvolt[24];
 };
 
-int write_status(const char *file, const struct device_status * status);
+int get_jsonstatus(char *jsonbuffer, int buflen);
+
+int init_device_status();
+int update_device_status(const struct nrf_modem_gnss_pvt_data_frame * pvt);
+
+
 
 #endif

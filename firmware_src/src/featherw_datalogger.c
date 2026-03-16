@@ -7,7 +7,6 @@ refactored and modified from the fat_fs zephyr example by Tavish Naruka <tavishn
 
 #include <zephyr/device.h>
 #include <zephyr/storage/disk_access.h>
-#include <zephyr/fs/fs.h>
 #include <zephyr/fs/fs_interface.h>
 #include <string.h>
 #include <ff.h>
