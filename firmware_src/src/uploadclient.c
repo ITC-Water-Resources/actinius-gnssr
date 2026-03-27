@@ -573,6 +573,7 @@ int webdavUploadFile(const char * filename,const struct config * conf){
 	
 	size_t filesize=file_size(filename);
 
+	last_http_status=HTTP_404_NOT_FOUND;
 
 	if( filesize == 0){
 		LOG_ERR("Not uploading %s, zero size or not existent",log_strdup(filename));
